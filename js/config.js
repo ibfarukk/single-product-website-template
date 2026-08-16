@@ -755,7 +755,190 @@ const ANALYTICS = {
 };
 
 // =========================================================
-// 23. PROMOTION / URGENCY (Use only genuine promotions)
+// 23. SALES POPUP / LIVE ORDER NOTIFICATIONS
+// These small popups show on the homepage every few seconds
+// to create social proof for visitors.
+//
+// Example message:
+// MUSA ALI just made payment for BUY 1
+// Amount: ₦25,000
+//
+// Edit the names below to any Nigerian full names you want.
+// The amount and package are pulled from your PACKAGES section.
+// =========================================================
+const SALES_POPUP = {
+    enabled: true,
+    intervalSeconds: 20,
+    displaySeconds: 5,
+    initialDelaySeconds: 4,
+    titlePrefix: "just made payment for",
+    amountLabel: "Amount",
+    names: [
+        "Musa Ali",
+        "Aisha Bello",
+        "Chinedu Okafor",
+        "Fatima Ibrahim",
+        "Ifeanyi Eze",
+        "Blessing Daniel",
+        "Suleiman Haruna",
+        "Zainab Usman",
+        "Emmanuel James",
+        "Khadijat Sani",
+        "Tochukwu Nwosu",
+        "Maryam Abdullahi",
+        "David Ojo",
+        "Halima Yusuf",
+        "Samuel Peter",
+        "Rukayat Lawal",
+        "Abubakar Sani",
+        "Adaobi Nnamdi",
+        "Aminu Garba",
+        "Amarachi Umeh",
+        "Amina Mohammed",
+        "Andrew Etim",
+        "Anietie Ekanem",
+        "Auwal Shehu",
+        "Bashir Adamu",
+        "Bilkisu Kabiru",
+        "Chiamaka Obi",
+        "Chisom Ezeani",
+        "Daniel Adebayo",
+        "Deborah John",
+        "Ebere Okonkwo",
+        "Ebuka Nwafor",
+        "Esther Adekunle",
+        "Evelyn Akpan",
+        "Favour Chukwu",
+        "Fisayo Adeyemi",
+        "Funmilayo Ogunleye",
+        "Gideon Musa",
+        "Grace Obi",
+        "Habiba Mustapha",
+        "Hadiza Lawan",
+        "Halimat Adeniran",
+        "Hauwa Ismail",
+        "Helen Udo",
+        "Hussein Idris",
+        "Ibrahim Bala",
+        "Ifeoma Ndukwe",
+        "Iniobong Ufot",
+        "Jamila Tanko",
+        "Janet Eze",
+        "Jennifer Okoro",
+        "Josephine Musa",
+        "Kabiru Isah",
+        "Kehinde Afolabi",
+        "Kelechi Emenike",
+        "Khadija Abdul",
+        "Lateefat Bello",
+        "Lilian Chukwuemeka",
+        "Linda Nwachukwu",
+        "Mary Okon",
+        "Mfonobong Bassey",
+        "Michael Adenuga",
+        "Mohammed Kabir",
+        "Morenike Ajayi",
+        "Muhammad Bashir",
+        "Munirat Salisu",
+        "Nafisat Abdulrahman",
+        "Nancy Umeh",
+        "Nkechi Anyanwu",
+        "Nkiru Okeke",
+        "Nneka Eze",
+        "Obinna Nwosu",
+        "Ogechi Ibe",
+        "Ojonugwa Ameh",
+        "Okechukwu Anozie",
+        "Olamide Akinola",
+        "Olubunmi Ajibade",
+        "Oluchi Ezeji",
+        "Oluwaseun Fadeyi",
+        "Opeyemi Ajala",
+        "Patience Sunday",
+        "Peter Udoh",
+        "Praise Nwachinemere",
+        "Rahmat Sulaiman",
+        "Rasheedat Adebisi",
+        "Rita Umeoji",
+        "Sadiq Abdulkarim",
+        "Safiya Lawal",
+        "Sandra Ijeoma",
+        "Shamsuddeen Umar",
+        "Sikirat Azeez",
+        "Somtochukwu Obi",
+        "Stephen Essien",
+        "Success Omonigho",
+        "Taiwo Balogun",
+        "Temitope Adegoke",
+        "Titilayo Shittu",
+        "Uchechi Nnaji",
+        "Udeme Okon",
+        "Ugochukwu Eze",
+        "Umar Farouk",
+        "Victoria Oseh",
+        "Wisdom Orji",
+        "Yahaya Abdullahi",
+        "Yewande Adetola",
+        "Yusuf Sadiq",
+        "Zara Abdullahi",
+        "Abdulmalik Gambo",
+        "Abisola Akinyemi",
+        "Adaeze Nwankwo",
+        "Adebimpe Adewale",
+        "Adekunle Sobowale",
+        "Adesuwa Osagie",
+        "Aisha Sulaiman",
+        "Akaninyene Udo",
+        "Akindele Olatunji",
+        "Amaka Ezeh",
+        "Aminat Kareem",
+        "Anayo Madu",
+        "Babatunde Salami",
+        "Benjamin Iroegbu",
+        "Chidinma Okoli",
+        "Chioma Nwosu",
+        "Chukwuebuka Ani",
+        "Comfort Godwin",
+        "Damola Adeoti",
+        "Damilola Olatoye",
+        "Ejiro Avwomakpa",
+        "Emeka Okeke",
+        "Fadekemi Aluko",
+        "Farida Aliyu",
+        "Godwin Akpabio",
+        "Goodness Eze",
+        "Hajara Mohammed",
+        "Ijeoma Nwafor",
+        "Iretioluwa Akinfenwa",
+        "Isaac Ekanem",
+        "Jumoke Adepoju",
+        "Kamsiyochukwu Umeh",
+        "Kenechukwu Okafor",
+        "Mariam Sule",
+        "Mayowa Alabi",
+        "Nnenna Maduabuchi",
+        "Nonso Eze",
+        "Okeoghene Edewor",
+        "Olaitan Oyeleke",
+        "Oluchi Nwafor",
+        "Onyinyechi Nnamani",
+        "Pelumi Adebisi",
+        "Queeneth Okoro",
+        "Racheal Akinlade",
+        "Rufus Danjuma",
+        "Salmat Ibrahim",
+        "Sodiq Azeez",
+        "Stanley Chukwuma",
+        "Tobi Akinyemi",
+        "Ufuoma Akpevwe",
+        "Ujunwa Nwoke",
+        "Vivian Obiageli",
+        "Zainab Garba"
+    ]
+};
+
+// =========================================================
+// 24. PROMOTION / URGENCY (Use only genuine promotions)
 // Use this as a sample promo section for future use.
 // If you enable it later, keep the offer honest and time-bound.
 // =========================================================
@@ -767,7 +950,7 @@ const PROMOTION = {
 };
 
 // =========================================================
-// 24. SOCIAL PROOF GALLERY (Optional)
+// 25. SOCIAL PROOF GALLERY (Optional)
 // Sample gallery content for future customer/lifestyle images.
 // Use real photos from happy customers or product usage.
 // =========================================================
@@ -783,7 +966,7 @@ const SOCIAL_PROOF_GALLERY = {
 };
 
 // =========================================================
-// 25. ABOUT THE COMPANY
+// 26. ABOUT THE COMPANY
 // This content shows in the section:
 // About Us
 // ABOUT PMELAB TECHNOLOGY LIMITED
@@ -797,7 +980,7 @@ const COMPANY = {
 };
 
 // =========================================================
-// 26. TRUST BADGES (Why Buy From Us)
+// 27. TRUST BADGES (Why Buy From Us)
 // Sample trust badge content for future use.
 // These can support reassurance messaging across the site.
 // =========================================================
@@ -811,7 +994,7 @@ const TRUST_BADGES = [
 ];
 
 // =========================================================
-// 27. CONTACT SECTION
+// 28. CONTACT SECTION
 // This controls the section:
 // Contact
 // GET IN TOUCH
@@ -825,7 +1008,7 @@ const CONTACT = {
 };
 
 // =========================================================
-// 28. ABOUT PRODUCT SECTION
+// 29. ABOUT PRODUCT SECTION
 // This content shows in the section:
 // About The Product
 // POWER WHEN YOU NEED IT MOST
@@ -847,7 +1030,7 @@ const ABOUT_PRODUCT = {
 };
 
 // =========================================================
-// 29. HERO TRUST INDICATORS
+// 30. HERO TRUST INDICATORS
 // These small trust items show under the hero buttons
 // in the top section "POWER THAT GOES WHERE YOU GO."
 // =========================================================
@@ -859,7 +1042,7 @@ const HERO_TRUST = [
 ];
 
 // =========================================================
-// 30. STICKY CTA CONFIG
+// 31. STICKY CTA CONFIG
 // This controls the sticky mobile action bar at the bottom of the screen.
 // =========================================================
 const STICKY_CTA = {
@@ -877,7 +1060,7 @@ if (typeof module !== 'undefined' && module.exports) {
         FEATURES, SPECIFICATIONS, PACKAGES, DELIVERY, GUARANTEE,
         WHY_CHOOSE, TESTIMONIALS, FAQ, WHATSAPP_NUMBERS, PAYMENT,
         MANUAL_PAYMENT, SOCIAL_LINKS, LOGO, NAVIGATION, FOOTER_LINKS,
-        SEO, ANALYTICS, PROMOTION, SOCIAL_PROOF_GALLERY, COMPANY,
+        SEO, ANALYTICS, SALES_POPUP, PROMOTION, SOCIAL_PROOF_GALLERY, COMPANY,
         TRUST_BADGES, CONTACT, ABOUT_PRODUCT, HERO_TRUST, STICKY_CTA
     };
 }

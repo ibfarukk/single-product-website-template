@@ -251,6 +251,111 @@
     }
 
     // =========================================================
+    // SALES POPUP / SOCIAL PROOF TOAST
+    // =========================================================
+    function isStorefrontPage() {
+        const path = window.location.pathname.toLowerCase();
+        return path.endsWith('/') ||
+            path.endsWith('/index.html') ||
+            path === '' ||
+            path === '/pmelab-single-product-template/';
+    }
+
+    function getEnabledPackages() {
+        return Array.isArray(PACKAGES) ? PACKAGES.filter(function(pkg) {
+            return pkg && typeof pkg.price === 'number' && pkg.title;
+        }) : [];
+    }
+
+    function createSalesPopup() {
+        const popup = document.createElement('div');
+        popup.className = 'sales-popup';
+        popup.setAttribute('aria-live', 'polite');
+        popup.innerHTML = [
+            '<div class="sales-popup-inner">',
+            '<div class="sales-popup-icon">',
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">',
+            '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H6"/>',
+            '</svg>',
+            '</div>',
+            '<div class="sales-popup-content">',
+            '<div class="sales-popup-title"></div>',
+            '<div class="sales-popup-amount"></div>',
+            '</div>',
+            '</div>'
+        ].join('');
+        document.body.appendChild(popup);
+        return popup;
+    }
+
+    function initSalesPopup() {
+        if (!isStorefrontPage() || typeof SALES_POPUP === 'undefined' || !SALES_POPUP.enabled) {
+            return;
+        }
+
+        const names = Array.isArray(SALES_POPUP.names) ? SALES_POPUP.names.filter(Boolean) : [];
+        const packages = getEnabledPackages();
+        if (!names.length || !packages.length) return;
+
+        const popup = createSalesPopup();
+        const titleEl = popup.querySelector('.sales-popup-title');
+        const amountEl = popup.querySelector('.sales-popup-amount');
+        const intervalMs = Math.max(5, Number(SALES_POPUP.intervalSeconds) || 10) * 1000;
+        const displayMs = Math.max(3, Number(SALES_POPUP.displaySeconds) || 5) * 1000;
+        const initialDelayMs = Math.max(1, Number(SALES_POPUP.initialDelaySeconds) || 4) * 1000;
+        let previousName = '';
+        let previousPackageId = '';
+        let hideTimer = null;
+
+        function randomFrom(list) {
+            return list[Math.floor(Math.random() * list.length)];
+        }
+
+        function pickName() {
+            if (names.length === 1) return names[0];
+            let name = randomFrom(names);
+            while (name === previousName) {
+                name = randomFrom(names);
+            }
+            previousName = name;
+            return name;
+        }
+
+        function pickPackage() {
+            if (packages.length === 1) return packages[0];
+            let pkg = randomFrom(packages);
+            while (pkg.id === previousPackageId) {
+                pkg = randomFrom(packages);
+            }
+            previousPackageId = pkg.id;
+            return pkg;
+        }
+
+        function showPopup() {
+            const fullName = pickName();
+            const pkg = pickPackage();
+
+            titleEl.innerHTML = '<strong>' + fullName.toUpperCase() + '</strong> ' + (SALES_POPUP.titlePrefix || 'just made payment for') + ' <strong>' + pkg.title + '</strong>';
+            amountEl.textContent = (SALES_POPUP.amountLabel || 'Amount') + ': ' + BUSINESS.currency + formatPrice(pkg.price);
+
+            popup.classList.add('visible');
+
+            if (hideTimer) {
+                window.clearTimeout(hideTimer);
+            }
+
+            hideTimer = window.setTimeout(function() {
+                popup.classList.remove('visible');
+            }, displayMs);
+        }
+
+        window.setTimeout(function() {
+            showPopup();
+            window.setInterval(showPopup, intervalMs);
+        }, initialDelayMs);
+    }
+
+    // =========================================================
     // UTILITY FUNCTIONS
     // =========================================================
     window.formatPrice = function(price) {
@@ -271,6 +376,7 @@
         initScrollAnimations();
         initAnalytics();
         initOwnerVisitTracking();
+        initSalesPopup();
         updateStickyCTA();
     });
 })();

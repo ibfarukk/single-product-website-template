@@ -6,6 +6,7 @@
     'use strict';
 
     let selectedPaymentMethod = 'paystack';
+    let checkoutModal = null;
 
     function isDigitalProduct() {
         return String(typeof PRODUCT_TYPE !== 'undefined' ? PRODUCT_TYPE : 'physical').toLowerCase() === 'digital';
@@ -224,6 +225,88 @@
         }).catch(function() {});
     }
 
+    function ensureCheckoutModal() {
+        if (checkoutModal) return checkoutModal;
+
+        const modal = document.createElement('div');
+        modal.className = 'checkout-modal-overlay';
+        modal.innerHTML = [
+            '<div class="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-modal-title">',
+            '<button type="button" class="checkout-modal-close" aria-label="Close modal">&times;</button>',
+            '<div class="checkout-modal-badge">',
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">',
+            '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>',
+            '</svg>',
+            '</div>',
+            '<h3 id="checkout-modal-title" class="checkout-modal-title"></h3>',
+            '<p class="checkout-modal-message"></p>',
+            '<div class="checkout-modal-actions">',
+            '<button type="button" class="btn btn-primary checkout-modal-confirm">OK</button>',
+            '</div>',
+            '</div>'
+        ].join('');
+
+        const style = document.createElement('style');
+        style.textContent = [
+            '.checkout-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:20px;z-index:9999;opacity:0;pointer-events:none;transition:opacity .2s ease;}',
+            '.checkout-modal-overlay.visible{opacity:1;pointer-events:auto;}',
+            '.checkout-modal{position:relative;width:100%;max-width:460px;background:#fff;border:1px solid rgba(229,231,235,1);border-radius:24px;box-shadow:0 30px 80px rgba(15,23,42,.22);padding:28px 24px 24px;text-align:left;transform:translateY(12px);transition:transform .2s ease;}',
+            '.checkout-modal-overlay.visible .checkout-modal{transform:translateY(0);}',
+            '.checkout-modal-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border:none;border-radius:50%;background:#f8fafc;color:#64748b;font-size:1.5rem;cursor:pointer;line-height:1;}',
+            '.checkout-modal-badge{width:52px;height:52px;border-radius:16px;background:rgba(22,163,74,.12);color:var(--primary);display:flex;align-items:center;justify-content:center;margin-bottom:18px;}',
+            '.checkout-modal-title{font-size:1.2rem;font-weight:800;color:var(--text);margin-bottom:10px;}',
+            '.checkout-modal-message{color:var(--muted);line-height:1.65;margin-bottom:24px;}',
+            '.checkout-modal-actions{display:flex;justify-content:flex-end;}',
+            '.checkout-modal-confirm{min-width:110px;justify-content:center;}'
+        ].join('');
+
+        document.head.appendChild(style);
+        document.body.appendChild(modal);
+
+        modal.querySelector('.checkout-modal-close').addEventListener('click', hideCheckoutModal);
+        modal.querySelector('.checkout-modal-confirm').addEventListener('click', hideCheckoutModal);
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) hideCheckoutModal();
+        });
+
+        checkoutModal = modal;
+        return modal;
+    }
+
+    function showCheckoutModal(title, message) {
+        const modal = ensureCheckoutModal();
+        modal.querySelector('.checkout-modal-title').textContent = title;
+        modal.querySelector('.checkout-modal-message').textContent = message;
+        modal.classList.add('visible');
+    }
+
+    function hideCheckoutModal() {
+        if (checkoutModal) {
+            checkoutModal.classList.remove('visible');
+        }
+    }
+
+    function setSubmitState(isBusy, label) {
+        const submitBtn = document.querySelector('#checkout-form button[type="submit"]');
+        if (!submitBtn) return function() {};
+
+        const originalText = submitBtn.dataset.originalText || submitBtn.innerHTML;
+        submitBtn.dataset.originalText = originalText;
+
+        if (isBusy) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/></svg> ' + label;
+        } else {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+
+        return function restore() {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        };
+    }
+
     // =========================================================
     // PAYSTACK PAYMENT
     // =========================================================
@@ -267,7 +350,10 @@
 
     function processPaystackPayment(pkg, customerInfo) {
         if (!getPaymentSettings().paystackEnabled || !PAYMENT.paystackPublicKey || PAYMENT.paystackPublicKey === 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') {
-            alert('Online payment is not configured yet. Please use manual payment or WhatsApp.');
+            showCheckoutModal(
+                'Online Payment Not Available',
+                'Online payment is not configured yet. Please use Manual Bank Transfer or WhatsApp ordering for now.'
+            );
             return;
         }
 
@@ -326,15 +412,8 @@
     }
 
     function verifyPayment(reference, pkg, customerInfo) {
-        // Show loading state
-        const submitBtn = document.querySelector('#checkout-form button[type="submit"]');
-        const originalText = submitBtn ? submitBtn.innerHTML : '';
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/></svg> Processing...';
-        }
+        const restoreSubmitState = setSubmitState(true, 'Processing...');
 
-        // Call Cloudflare Worker to verify
         fetch(getApiUrl('/api/verify-payment'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -356,15 +435,13 @@
         })
         .catch(function(err) {
             console.error('Payment verification error:', err);
-            // Even if verification fails, redirect to success if Paystack says it succeeded
-            // The webhook will handle it server-side
-            window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
+            showCheckoutModal(
+                'Payment Verification Failed',
+                'We could not confirm your payment with the server. Please wait a moment and try again, or contact support with your payment reference.'
+            );
         })
         .finally(function() {
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalText;
-            }
+            restoreSubmitState();
         });
     }
 
@@ -412,7 +489,8 @@
             formData.append('payment_receipt', receiptFile, receiptFile.name);
         }
 
-        // Send to Cloudflare Worker
+        const restoreSubmitState = setSubmitState(true, 'Submitting Order...');
+
         fetch(getApiUrl('/api/manual-order'), {
             method: 'POST',
             body: formData
@@ -422,15 +500,21 @@
             if (data.success) {
                 window.location.href = 'success.html?ref=' + encodeURIComponent(orderData.order_ref) + '&pkg=' + encodeURIComponent(pkg.id) + '&manual=1';
             } else {
-                alert('There was an error submitting your order. Please try again or order via WhatsApp.');
+                showCheckoutModal(
+                    'Order Not Submitted',
+                    'We could not submit your manual order yet. Please try again in a moment or contact us on WhatsApp.'
+                );
             }
         })
         .catch(function(err) {
             console.error('Manual order error:', err);
-            // Still redirect to success page - the worker webhook may have issues
-            // but we don't want to lose the customer
-            alert('Your order has been received. Please complete your bank transfer and send proof via WhatsApp.');
-            window.location.href = 'success.html?ref=' + encodeURIComponent(orderData.order_ref) + '&pkg=' + encodeURIComponent(pkg.id) + '&manual=1';
+            showCheckoutModal(
+                'Submission Failed',
+                'We could not confirm your order, so Your order was not delivered to us. Use our WhatsApp Order or  try again and wait for confirmation before leaving this page.'
+            );
+        })
+        .finally(function() {
+            restoreSubmitState();
         });
     }
 
