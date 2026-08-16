@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pmelab-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-16",
+  "observability": {
+    "enabled": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OWNER_STATS"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "your-domain.com/api/*",
+      "custom_domain": true
+    }
+  ]
+}

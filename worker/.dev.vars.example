@@ -1,0 +1,41 @@
+## =========================================================
+## PMELAB Worker local development variables
+## Copy this file to .dev.vars for local wrangler dev usage.
+## Do NOT commit your real .dev.vars file.
+## =========================================================
+
+## Required for order/payment verification
+PAYSTACK_SECRET_KEY=sk_test_your_paystack_secret_key_here
+
+## Required for owner/admin notifications
+OWNER_EMAIL=owner@example.com
+
+## Owner dashboard login
+OWNER_DASHBOARD_USERNAME=owner
+OWNER_DASHBOARD_PASSWORD=change_this_dashboard_password
+
+## Gmail SMTP (primary sender)
+## Use a Gmail App Password, not your normal Gmail password.
+GMAIL_SMTP_HOST=smtp.gmail.com
+GMAIL_SMTP_PORT=465
+GMAIL_SMTP_USER=yourgmail@gmail.com
+GMAIL_SMTP_PASSWORD=your_16_character_gmail_app_password
+
+## Optional explicit sender for Gmail
+## Leave blank unless this is a valid Gmail or verified Gmail alias.
+GMAIL_FROM_EMAIL=yourgmail@gmail.com
+
+## Optional common sender override
+## Used as a general sender if set.
+MAIL_FROM=yourgmail@gmail.com
+
+## Resend fallback (optional but recommended)
+RESEND_API_KEY=re_your_resend_api_key_here
+RESEND_FROM_EMAIL=orders@yourdomain.com
+
+## Optional Discord order notifications
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your_webhook_id/your_webhook_token
+
+## Optional Telegram order notifications
+TELEGRAM_BOT_TOKEN=123456789:your_telegram_bot_token_here
+TELEGRAM_CHAT_ID=-1001234567890

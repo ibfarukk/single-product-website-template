@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owner Dashboard</title>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <style>
+        body {
+            background: #f8fafc;
+        }
+        .owner-page {
+            min-height: 100vh;
+            padding: 32px 16px;
+        }
+        .owner-shell {
+            max-width: 1120px;
+            margin: 0 auto;
+        }
+        .owner-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .owner-title h1 {
+            font-size: 1.8rem;
+            margin-bottom: 6px;
+        }
+        .owner-title p {
+            color: var(--muted);
+            margin: 0;
+        }
+        .owner-panel {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            box-shadow: var(--shadow-lg);
+            padding: 24px;
+        }
+        .owner-login {
+            max-width: 460px;
+            margin: 60px auto 0;
+        }
+        .owner-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .owner-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .owner-card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .owner-card-label {
+            color: var(--muted);
+            font-size: 0.92rem;
+            margin-bottom: 10px;
+        }
+        .owner-card-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--text);
+        }
+        .owner-meta {
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-bottom: 18px;
+        }
+        .owner-note {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            color: var(--muted);
+        }
+        .owner-error {
+            margin-top: 12px;
+            color: #dc2626;
+            font-size: 0.95rem;
+        }
+        .owner-hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="owner-page">
+        <div class="owner-shell">
+            <div id="owner-login-view" class="owner-login owner-panel">
+                <div class="owner-title">
+                    <h1>Owner Dashboard</h1>
+                    <p>Sign in to view store stats.</p>
+                </div>
+
+                <form id="owner-login-form" style="margin-top: 24px;">
+                    <div class="form-group">
+                        <label for="owner-username">Username</label>
+                        <input type="text" id="owner-username" name="username" autocomplete="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="owner-password">Password</label>
+                        <input type="password" id="owner-password" name="password" autocomplete="current-password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;">View Stats</button>
+                    <div id="owner-login-error" class="owner-error owner-hidden" role="alert" aria-live="polite"></div>
+                </form>
+            </div>
+
+            <div id="owner-dashboard-view" class="owner-hidden">
+                <div class="owner-header">
+                    <div class="owner-title">
+                        <h1>Owner Dashboard</h1>
+                        <p>Private sales and traffic overview.</p>
+                    </div>
+                    <div class="owner-actions">
+                        <button id="owner-refresh-btn" class="btn btn-primary" type="button">Refresh</button>
+                        <button id="owner-logout-btn" class="btn btn-secondary" type="button">Logout</button>
+                    </div>
+                </div>
+
+                <div class="owner-meta" id="owner-last-updated">Last updated: --</div>
+
+                <div class="owner-grid">
+                    <div class="owner-card">
+                        <div class="owner-card-label">Visitors</div>
+                        <div class="owner-card-value" data-stat="totalVisitors">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Page Views</div>
+                        <div class="owner-card-value" data-stat="totalPageViews">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Successful Sales</div>
+                        <div class="owner-card-value" data-stat="successfulSalesCount">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Sales Revenue</div>
+                        <div class="owner-card-value" data-stat-money="successfulSalesAmount">₦0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Failed Sales</div>
+                        <div class="owner-card-value" data-stat="failedSalesCount">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Abandoned Checkout</div>
+                        <div class="owner-card-value" data-stat="abandonedCheckoutCount">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Manual Orders</div>
+                        <div class="owner-card-value" data-stat="manualOrdersCount">0</div>
+                    </div>
+                    <div class="owner-card">
+                        <div class="owner-card-label">Manual Order Value</div>
+                        <div class="owner-card-value" data-stat-money="manualOrdersAmount">₦0</div>
+                    </div>
+                </div>
+
+                <div class="owner-panel">
+                    <div class="owner-note">
+                        <strong>What these numbers mean</strong><br>
+                        Successful sales count verified Paystack orders. Manual orders are tracked separately because they may still be awaiting confirmation. Failed sales count backend verification failures. Abandoned checkout counts Paystack windows closed before completion.
+                    </div>
+                    <div id="owner-dashboard-error" class="owner-error owner-hidden"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/owner.js"></script>
+</body>
+</html>
