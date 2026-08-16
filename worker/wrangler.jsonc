@@ -3,6 +3,10 @@
   "name": "pmelab-worker",
   "main": "src/index.js",
   "compatibility_date": "2026-08-16",
+  // Keep workers.dev enabled so the backend can work on its own URL.
+  // This is the easiest setup when your frontend is on Cloudflare Pages
+  // using a *.pages.dev domain.
+  "workers_dev": true,
   "observability": {
     "enabled": true
   },
@@ -11,10 +15,20 @@
       "binding": "OWNER_STATS"
     }
   ],
-  "routes": [
-    {
-      "pattern": "your-domain.com/api/*",
-      "custom_domain": true
-    }
-  ]
+  // Only add a route below if you are using a REAL custom domain
+  // and want the Worker to answer on:
+  // https://yourdomain.com/api/*
+  //
+  // If your frontend is on:
+  // https://yourproject.pages.dev
+  // then leave routes disabled and set API_BASE_URL in js/config.js
+  // to your Worker URL, for example:
+  // https://pmelab-worker.your-subdomain.workers.dev
+  //
+  // "routes": [
+  //   {
+  //     "pattern": "yourdomain.com/api/*",
+  //     "custom_domain": true
+  //   }
+  // ]
 }

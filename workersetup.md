@@ -1,52 +1,66 @@
 # Worker Setup
 
-This file explains how to set up the Cloudflare Worker for this project.
+This file is the Worker-only setup guide for this project.
+
+Use [deployment.md](file:///c:/laragon/www/PMELAB-single-product-template/deployment.md) for the full frontend + backend deployment flow.
+Use this file when you want to focus only on:
+
+- the Cloudflare Worker
+- Worker secrets and vars
+- email sending
+- Discord / Telegram notifications
+- owner dashboard stats storage
+- Worker routes and testing
+
+## What the Worker does
 
 The Worker handles:
 
 - Paystack payment verification
 - Paystack webhooks
-- manual bank transfer orders
+- manual bank transfer order submission
 - owner/admin email notifications
 - customer confirmation emails
 - Gmail SMTP sending
-- Resend fallback if Gmail SMTP fails
-- Discord notifications for orders and failed attempts
-- Telegram notifications for orders and failed attempts
-- owner stats storage and protected dashboard API
+- Resend fallback if Gmail fails
+- Discord notifications
+- Telegram notifications
+- owner stats dashboard API
+- visitor and checkout attempt tracking
 
-## Files
+## Important files
 
 - Worker code: [worker/src/index.js](file:///c:/laragon/www/PMELAB-single-product-template/worker/src/index.js)
 - Worker config: [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
 - Local env example: [worker/.dev.vars.example](file:///c:/laragon/www/PMELAB-single-product-template/worker/.dev.vars.example)
-- Owner dashboard page: [owner.html](file:///c:/laragon/www/PMELAB-single-product-template/owner.html)
+- Worker local ignore file: [worker/.gitignore](file:///c:/laragon/www/PMELAB-single-product-template/worker/.gitignore)
+- Owner page: [owner.html](file:///c:/laragon/www/PMELAB-single-product-template/owner.html)
 
-## 1. Install Worker dependencies
+## 1. Install Worker dependencies locally
 
-Open a terminal in the `worker` folder and run:
+Open a terminal inside the `worker` folder and run:
 
 ```bash
 npm install
 ```
 
-## 2. Local development env file
+## 2. Create local Worker env file
 
-For local testing with `wrangler dev`, create a file named:
+For local testing, create:
 
 ```text
 worker/.dev.vars
 ```
 
-You can copy from:
+Copy from:
 
 ```text
 worker/.dev.vars.example
 ```
 
-The project already includes [worker/.gitignore](file:///c:/laragon/www/PMELAB-single-product-template/worker/.gitignore), so your real `.dev.vars` will not be committed.
+The real `.dev.vars` file should stay local only.
 
-Example local env:
+Example:
 
 ```env
 PAYSTACK_SECRET_KEY=sk_test_your_paystack_secret_key_here
@@ -70,19 +84,29 @@ TELEGRAM_BOT_TOKEN=123456789:your_telegram_bot_token_here
 TELEGRAM_CHAT_ID=-1001234567890
 ```
 
-## 3. What each variable does
+## 3. What each env variable does
+
+### Required
 
 `PAYSTACK_SECRET_KEY`  
-Used to verify Paystack transactions and webhooks.
+Used to verify Paystack transactions and Paystack webhooks.
 
 `OWNER_EMAIL`  
-The email address that receives new order notifications.
+The email that receives new order notifications.
 
-`OWNER_DASHBOARD_USERNAME`
-The username required to access the owner stats dashboard.
+`OWNER_DASHBOARD_USERNAME`  
+Username for [owner.html](file:///c:/laragon/www/PMELAB-single-product-template/owner.html).
 
-`OWNER_DASHBOARD_PASSWORD`
-The password required to access the owner stats dashboard.
+`OWNER_DASHBOARD_PASSWORD`  
+Password for [owner.html](file:///c:/laragon/www/PMELAB-single-product-template/owner.html).
+
+`GMAIL_SMTP_USER`  
+The Gmail account used to send mail.
+
+`GMAIL_SMTP_PASSWORD`  
+A Gmail App Password, not your normal Gmail password.
+
+### Optional but recommended
 
 `GMAIL_SMTP_HOST`  
 Usually `smtp.gmail.com`.
@@ -90,70 +114,51 @@ Usually `smtp.gmail.com`.
 `GMAIL_SMTP_PORT`  
 Recommended: `465`.
 
-`GMAIL_SMTP_USER`  
-Your Gmail address used for SMTP login.
-
-`GMAIL_SMTP_PASSWORD`  
-Your Gmail App Password. Do not use your normal Gmail password.
-
 `GMAIL_FROM_EMAIL`  
-Optional. The visible sender for Gmail SMTP. Use only if it is the Gmail address itself or a valid Gmail alias.
+Optional visible sender for Gmail. Safest value is the same Gmail account used for SMTP.
 
 `MAIL_FROM`  
-Optional common sender override.
+Optional general sender override.
 
 `RESEND_API_KEY`  
-Optional fallback provider. If Gmail SMTP fails, the Worker will try Resend.
+Fallback provider if Gmail fails.
 
 `RESEND_FROM_EMAIL`  
-The sender address for Resend fallback. This must be valid in Resend.
+The sender address used by Resend.
 
-`DISCORD_WEBHOOK_URL`
-Optional. If set, the Worker sends order notifications to Discord.
+`DISCORD_WEBHOOK_URL`  
+Optional Discord order notifications.
 
-`TELEGRAM_BOT_TOKEN`
-Optional. Telegram bot token for order notifications.
+`TELEGRAM_BOT_TOKEN`  
+Optional Telegram bot token for notifications.
 
-`TELEGRAM_CHAT_ID`
-Optional. Telegram chat or group id that receives the notifications.
+`TELEGRAM_CHAT_ID`  
+Optional Telegram chat or group ID.
 
-## 3.5 Owner dashboard and stats storage
+## 4. Local Worker test
 
-The project now includes a private owner page:
+From the `worker` folder:
 
-```text
-/owner.html
+```bash
+npm run dev
 ```
 
-This page shows:
+or:
 
-- visitors
-- page views
-- successful sales
-- successful sales revenue
-- failed sales
-- abandoned checkout count
-- manual order count
-- manual order value
+```bash
+npx wrangler dev
+```
 
-How access works:
+This uses `worker/.dev.vars` automatically.
 
-- the page asks for username and password
-- the Worker checks those against `OWNER_DASHBOARD_USERNAME` and `OWNER_DASHBOARD_PASSWORD`
-- without valid credentials, stats cannot be loaded
+## 5. Gmail SMTP setup
 
-Stats are stored in Worker KV using the `OWNER_STATS` binding already added in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc).
-
-If your Wrangler version does not auto-provision KV on deploy, create the KV namespace manually and add its id to `wrangler.jsonc`.
-
-## 4. Gmail setup
-
-To use Gmail SMTP:
+To use Gmail as the main sender:
 
 1. Log in to your Google account
-2. Enable 2-Step Verification
-3. Create a Gmail App Password
-4. Put that App Password into:
+2. Enable **2-Step Verification**
+3. Create a **Google App Password**
+4. Put that app password into:
 
 ```env
 GMAIL_SMTP_PASSWORD=...
@@ -171,13 +176,13 @@ GMAIL_FROM_EMAIL=yourgmail@gmail.com
 
 Important:
 
-- Gmail is the **primary** sender
-- Resend is the **fallback**
-- Gmail is stricter about `From` addresses, so it is safest to use the same Gmail address as the sender
+- Gmail is the primary sender
+- Resend is the fallback
+- Gmail is stricter about sender identity, so `GMAIL_FROM_EMAIL` should normally be the same Gmail address
 
-## 5. Resend fallback setup
+## 6. Resend fallback setup
 
-If Gmail SMTP fails, the Worker will automatically try Resend.
+If Gmail fails, the Worker automatically tries Resend.
 
 Set:
 
@@ -189,83 +194,132 @@ RESEND_FROM_EMAIL=orders@yourdomain.com
 Important:
 
 - `RESEND_FROM_EMAIL` must be valid in your Resend account
-- if Gmail is not configured, Resend can still send as long as these two values exist
+- Resend can work even if Gmail is not configured, as long as these values are valid
 
-## 6. Discord notifications
+## 7. Discord and Telegram notifications
 
-If you want Discord notifications, set:
+### Discord
+
+Set:
 
 ```env
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your_webhook_id/your_webhook_token
 ```
 
-The Worker will send notifications for:
+### Telegram
 
-- verified Paystack orders
-- manual orders received
-- failed Paystack verification attempts that hit the Worker
-- abandoned checkout when the customer closes Paystack on the frontend
-
-## 7. Telegram notifications
-
-If you want Telegram notifications, set:
+Set:
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:your_telegram_bot_token_here
 TELEGRAM_CHAT_ID=-1001234567890
 ```
 
-The Worker will send notifications for:
+Notifications are sent for:
 
 - verified Paystack orders
 - manual orders received
-- failed Paystack verification attempts that hit the Worker
+- failed Paystack verification attempts
+- abandoned checkout when the customer closes Paystack before payment completes
 
-Important:
+## 8. Owner dashboard stats
 
-- the Worker only sees attempts that reach backend verification
-- if a customer opens Paystack and closes it before verification, the Worker cannot notify that event because it never receives it
+The private owner page is:
 
-## 8. Local Worker run
-
-From the `worker` folder:
-
-```bash
-npm run dev
+```text
+/owner.html
 ```
 
-or:
+It reads protected data from:
 
-```bash
-npx wrangler dev
+```text
+/api/owner/stats
 ```
 
-This will use your local `.dev.vars` automatically.
+The login is controlled by:
 
-## 9. Production secrets
-
-For deployed Workers, do **not** use `.dev.vars`.
-
-Use Wrangler secrets instead.
-
-From the `worker` folder:
-
-```bash
-wrangler secret put PAYSTACK_SECRET_KEY
-wrangler secret put OWNER_EMAIL
-wrangler secret put OWNER_DASHBOARD_USERNAME
-wrangler secret put OWNER_DASHBOARD_PASSWORD
-wrangler secret put GMAIL_SMTP_USER
-wrangler secret put GMAIL_SMTP_PASSWORD
-wrangler secret put RESEND_API_KEY
-wrangler secret put DISCORD_WEBHOOK_URL
-wrangler secret put TELEGRAM_BOT_TOKEN
-wrangler secret put TELEGRAM_CHAT_ID
+```text
+OWNER_DASHBOARD_USERNAME
+OWNER_DASHBOARD_PASSWORD
 ```
 
-For non-secret values, you can also set them in Cloudflare Worker settings or add them as plain vars if you want, but secrets are better when sensitive.
+The Worker tracks and stores:
 
-Recommended production values:
+- total visitors
+- total page views
+- successful sales
+- successful sales revenue
+- failed sales
+- abandoned checkout
+- manual orders
+- manual order value
+
+Traffic and checkout data come from:
+
+- `/api/track-visit`
+- `/api/track-order-attempt`
+- `/api/verify-payment`
+- `/api/manual-order`
+
+## 9. KV storage for owner stats
+
+The owner dashboard uses a KV binding named:
+
+```text
+OWNER_STATS
+```
+
+That binding already exists in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc).
+
+If Cloudflare auto-provisions KV, you are fine.
+
+If it does not, create it manually:
+
+1. Open your Worker in Cloudflare
+2. Go to **Storage**
+3. Create a KV namespace
+4. Bind it as:
+
+```text
+OWNER_STATS
+```
+
+If the owner dashboard says `Stats storage not configured`, this is the first thing to check.
+
+## 10. Production Worker deploy from GitHub
+
+This project is meant to deploy the Worker from GitHub using Cloudflare’s Git integration.
+
+Use [deployment.md](file:///c:/laragon/www/PMELAB-single-product-template/deployment.md) for the full account-level flow.
+
+Worker-specific settings:
+
+- Worker name should match `name` in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
+- root directory should be:
+
+```text
+worker
+```
+
+- install/build command:
+
+```text
+npm install
+```
+
+- deploy command:
+
+```text
+npx wrangler deploy
+```
+
+## 11. Production secrets and vars
+
+Do not use `.dev.vars` in production.
+
+Add the values in Cloudflare Worker settings.
+
+### Core production values
 
 ```text
 PAYSTACK_SECRET_KEY=sk_live_...
@@ -276,53 +330,67 @@ GMAIL_SMTP_USER=yourgmail@gmail.com
 GMAIL_SMTP_PASSWORD=your_gmail_app_password
 ```
 
-Optional production values:
+### Optional production values
 
 ```text
 GMAIL_SMTP_HOST=smtp.gmail.com
 GMAIL_SMTP_PORT=465
 GMAIL_FROM_EMAIL=yourgmail@gmail.com
 MAIL_FROM=yourgmail@gmail.com
+
 RESEND_API_KEY=re_...
 RESEND_FROM_EMAIL=orders@yourdomain.com
+
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your_webhook_id/your_webhook_token
 TELEGRAM_BOT_TOKEN=123456789:your_telegram_bot_token_here
 TELEGRAM_CHAT_ID=-1001234567890
 ```
 
-## 10. Deploy the Worker
+## 12. Worker route
 
-From the `worker` folder:
+This Worker now supports both modes:
 
-```bash
-npm run deploy
+### Mode A: Pages frontend + workers.dev backend
+
+Use:
+
+```text
+https://yourproject.pages.dev
 ```
 
-or:
+for the frontend, and:
 
-```bash
-npx wrangler deploy
+```text
+https://your-worker-name.your-subdomain.workers.dev
 ```
 
-## 11. Update the route/domain
+for the backend.
 
-Check [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc).
+In this mode:
 
-It still contains:
+- leave the `routes` section disabled in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
+- set `API_BASE_URL` in [js/config.js](file:///c:/laragon/www/PMELAB-single-product-template/js/config.js) to your Worker URL
+
+### Mode B: Custom domain frontend + same-domain backend
+
+This Worker can also serve the API on the same domain as the frontend:
+
+```text
+yourdomain.com/api/*
+```
+
+In this mode:
+
+- leave `API_BASE_URL` empty in [js/config.js](file:///c:/laragon/www/PMELAB-single-product-template/js/config.js)
+- enable the route in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
+
+Example route:
 
 ```json
-"pattern": "your-domain.com/api/*"
+"pattern": "yourdomain.com/api/*"
 ```
 
-Replace that with your real production domain before final deployment.
-
-Example:
-
-```json
-"pattern": "paymelab.com/api/*"
-```
-
-## 12. How email sending works now
+## 13. What emails the Worker sends
 
 ### Paystack orders
 
@@ -346,124 +414,44 @@ For manual orders, the owner/admin email includes:
 - package
 - quantity
 - amount
-- customer name
-- customer email
-- customer phone
-- customer address/state/city
+- customer details
 - special request
 - uploaded receipt as an attachment
 
-## 13. How notifications work
+## 14. Receipt attachment behavior
 
-If Discord and/or Telegram are configured, the Worker sends notifications for:
+If a customer uses manual bank transfer and uploads a receipt:
 
-- verified Paystack orders
-- manual orders received
-- failed Paystack verification attempts that reach the Worker
-
-The notification includes:
-
-- order reference
-- package id
-- amount
-- customer name
-- customer email
-- customer phone
-- address if present
-- extra event details
-
-## 14. Owner dashboard stats
-
-The owner dashboard reads from:
-
-```text
-/api/owner/stats
-```
-
-Protected with Basic Auth using:
-
-```text
-OWNER_DASHBOARD_USERNAME
-OWNER_DASHBOARD_PASSWORD
-```
-
-Traffic and checkout data are collected from:
-
-- `/api/track-visit`
-- `/api/track-order-attempt`
-- `/api/verify-payment`
-- `/api/manual-order`
-
-## 15. Receipt attachment behavior
-
-If a customer chooses manual bank transfer and uploads a receipt:
-
-- the receipt file is sent to the Worker
-- the Worker attaches it to the owner/admin email
-- Gmail SMTP sends it directly if Gmail works
+- the receipt is sent to the Worker
+- the Worker includes it in the owner/admin email
+- Gmail sends it directly if Gmail works
 - Resend sends it if Gmail fails and Resend is configured
 
-## 16. Minimum recommended setup
+## 15. Worker test checklist
 
-If you want the smallest working production setup:
+After production setup, test these:
 
-```text
-PAYSTACK_SECRET_KEY
-OWNER_EMAIL
-OWNER_DASHBOARD_USERNAME
-OWNER_DASHBOARD_PASSWORD
-GMAIL_SMTP_USER
-GMAIL_SMTP_PASSWORD
-```
+1. Paystack success flow
+2. Paystack verification failure flow
+3. Paystack close/abandon flow
+4. manual bank transfer flow
+5. receipt upload
+6. owner email delivery
+7. customer email delivery
+8. receipt attachment delivery
+9. Discord notification if enabled
+10. Telegram notification if enabled
+11. owner dashboard login
+12. owner dashboard stats updating
 
-If you want safer email delivery:
-
-```text
-PAYSTACK_SECRET_KEY
-OWNER_EMAIL
-GMAIL_SMTP_USER
-GMAIL_SMTP_PASSWORD
-RESEND_API_KEY
-RESEND_FROM_EMAIL
-```
-
-For notifications too:
-
-```text
-DISCORD_WEBHOOK_URL
-```
-
-or:
-
-```text
-TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID
-```
-
-## 17. Quick test checklist
-
-After deployment, test these:
-
-1. Paystack order succeeds
-2. owner receives Paystack order email
-3. customer receives Paystack confirmation email
-4. manual bank transfer can be submitted
-5. receipt upload works
-6. owner receives manual order email with the receipt attached
-7. customer receives manual order confirmation email
-8. Discord receives order notifications if enabled
-9. Telegram receives order notifications if enabled
-10. `owner.html` accepts the correct username and password
-11. the dashboard stats change after test visits and test orders
-
-## 18. Common problems
+## 16. Common Worker problems
 
 ### Gmail auth fails
 
 Usually caused by:
 
-- using normal Gmail password instead of App Password
-- 2-Step Verification not enabled
+- using your normal Gmail password instead of App Password
+- not enabling 2-Step Verification
 - invalid `GMAIL_FROM_EMAIL`
 
 ### Resend fallback fails
@@ -478,56 +466,73 @@ Usually caused by:
 
 Check:
 
-- `DISCORD_WEBHOOK_URL` is correct
-- the webhook still exists in your Discord server
-- the Worker logs do not show webhook errors
+- `DISCORD_WEBHOOK_URL`
+- webhook still exists
+- Worker logs for webhook errors
 
 ### Telegram notifications do not arrive
 
 Check:
 
-- `TELEGRAM_BOT_TOKEN` is correct
-- `TELEGRAM_CHAT_ID` is correct
-- the bot has permission to post in that chat or group
-
-### Manual order email arrives without attachment
-
-Check:
-
-- the customer selected manual bank transfer
-- a receipt was actually uploaded
-- the file was not empty
-
-### Worker deploys but API route does not work
-
-Check:
-
-- [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
-- your real route/domain pattern
-- whether the frontend is calling the correct `/api/...` endpoint
-
-### Owner dashboard says stats storage is not configured
-
-Check:
-
-- the `OWNER_STATS` KV binding exists
-- Wrangler auto-provisioning worked, or
-- you manually created a KV namespace and added its id in [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- bot permission in the target chat
 
 ### Owner dashboard login fails
 
 Check:
 
-- `OWNER_DASHBOARD_USERNAME` is set
-- `OWNER_DASHBOARD_PASSWORD` is set
-- you deployed the updated Worker after setting them
+- `OWNER_DASHBOARD_USERNAME`
+- `OWNER_DASHBOARD_PASSWORD`
+- Worker redeployed after adding them
 
-## 19. Suggested next step
+### Owner dashboard stats fail
 
-After setting secrets, place one real test order in local or staging mode and confirm:
+Check:
 
-- Gmail sends correctly
-- if Gmail is broken, Resend fallback sends correctly
-- the admin email includes the uploaded receipt attachment
-- Discord receives the notification if enabled
-- Telegram receives the notification if enabled
+- `OWNER_STATS` binding exists
+- KV namespace is attached correctly
+
+### API routes do not work
+
+Check:
+
+- [worker/wrangler.jsonc](file:///c:/laragon/www/PMELAB-single-product-template/worker/wrangler.jsonc)
+- route pattern uses the real domain
+- frontend is being tested on the same live custom domain
+
+## 17. Minimum recommended production setup
+
+Smallest practical setup:
+
+```text
+PAYSTACK_SECRET_KEY
+OWNER_EMAIL
+OWNER_DASHBOARD_USERNAME
+OWNER_DASHBOARD_PASSWORD
+GMAIL_SMTP_USER
+GMAIL_SMTP_PASSWORD
+```
+
+Better setup:
+
+```text
+PAYSTACK_SECRET_KEY
+OWNER_EMAIL
+OWNER_DASHBOARD_USERNAME
+OWNER_DASHBOARD_PASSWORD
+GMAIL_SMTP_USER
+GMAIL_SMTP_PASSWORD
+RESEND_API_KEY
+RESEND_FROM_EMAIL
+```
+
+## 18. Recommended next step
+
+After Worker deployment:
+
+1. confirm the route works on your live domain
+2. test one Paystack order
+3. test one manual order with receipt upload
+4. confirm emails and notifications arrive
+5. confirm the owner dashboard updates

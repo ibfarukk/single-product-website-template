@@ -209,8 +209,15 @@
         return div.innerHTML;
     }
 
+    function getApiUrl(path) {
+        const cleanPath = path.startsWith('/') ? path : '/' + path;
+        const base = typeof API_BASE_URL !== 'undefined' ? String(API_BASE_URL).trim() : '';
+        if (!base) return cleanPath;
+        return base.replace(/\/+$/, '') + cleanPath;
+    }
+
     function sendOwnerTracking(endpoint, payload) {
-        fetch(endpoint, {
+        fetch(getApiUrl(endpoint), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload || {})
@@ -328,7 +335,7 @@
         }
 
         // Call Cloudflare Worker to verify
-        fetch('/api/verify-payment', {
+        fetch(getApiUrl('/api/verify-payment'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -406,7 +413,7 @@
         }
 
         // Send to Cloudflare Worker
-        fetch('/api/manual-order', {
+        fetch(getApiUrl('/api/manual-order'), {
             method: 'POST',
             body: formData
         })

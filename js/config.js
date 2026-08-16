@@ -51,6 +51,26 @@ const BUSINESS = {
 };
 
 // =========================================================
+// 1A. API CONNECTION CONFIGURATION
+// Leave this EMPTY if your frontend and backend use the same domain:
+// Example:
+// - Frontend: https://yourdomain.com
+// - Backend:  https://yourdomain.com/api/*
+//
+// Set this to your Worker URL if your frontend is on Pages
+// and your backend is on a different Worker domain.
+// Example:
+// API_BASE_URL = "https://pmelab-worker.your-subdomain.workers.dev"
+//
+// This affects:
+// - payment verification
+// - manual order submission
+// - visitor tracking
+// - owner dashboard stats
+// =========================================================
+const API_BASE_URL = "";
+
+// =========================================================
 // 2. BRAND CONFIGURATION
 // Edit this section to change the colors across the whole website.
 // This shows in: buttons, highlights, badges, icons, links,
@@ -853,7 +873,7 @@ const STICKY_CTA = {
 // =========================================================
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        BUSINESS, BRAND, PRODUCT, PRODUCT_TYPE, PRODUCT_IMAGES, PRODUCT_VIDEOS,
+        BUSINESS, API_BASE_URL, BRAND, PRODUCT, PRODUCT_TYPE, PRODUCT_IMAGES, PRODUCT_VIDEOS,
         FEATURES, SPECIFICATIONS, PACKAGES, DELIVERY, GUARANTEE,
         WHY_CHOOSE, TESTIMONIALS, FAQ, WHATSAPP_NUMBERS, PAYMENT,
         MANUAL_PAYMENT, SOCIAL_LINKS, LOGO, NAVIGATION, FOOTER_LINKS,

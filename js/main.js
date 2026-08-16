@@ -215,6 +215,13 @@
         });
     }
 
+    function getApiUrl(path) {
+        const cleanPath = path.startsWith('/') ? path : '/' + path;
+        const base = typeof API_BASE_URL !== 'undefined' ? String(API_BASE_URL).trim() : '';
+        if (!base) return cleanPath;
+        return base.replace(/\/+$/, '') + cleanPath;
+    }
+
     function initOwnerVisitTracking() {
         if (window.location.pathname.toLowerCase().endsWith('/owner.html')) {
             return;
@@ -227,7 +234,7 @@
                 localStorage.setItem('pmelab_visitor_id', visitorId);
             }
 
-            fetch('/api/track-visit', {
+            fetch(getApiUrl('/api/track-visit'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

@@ -47,6 +47,13 @@
         sessionStorage.removeItem(STORAGE_KEY);
     }
 
+    function getApiUrl(path) {
+        const cleanPath = path.startsWith('/') ? path : '/' + path;
+        const base = typeof API_BASE_URL !== 'undefined' ? String(API_BASE_URL).trim() : '';
+        if (!base) return cleanPath;
+        return base.replace(/\/+$/, '') + cleanPath;
+    }
+
     function setLoginFieldErrorState(hasError) {
         ['owner-username', 'owner-password'].forEach(function(id) {
             const input = document.getElementById(id);
@@ -66,7 +73,7 @@
     }
 
     async function fetchStats(token) {
-        const response = await fetch('/api/owner/stats', {
+        const response = await fetch(getApiUrl('/api/owner/stats'), {
             method: 'GET',
             headers: {
                 'Authorization': 'Basic ' + token
