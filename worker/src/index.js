@@ -1257,7 +1257,10 @@ function extractEmailAddress(value) {
 }
 
 function getFromEmail(env) {
-    return env.MAIL_FROM || env.GMAIL_SMTP_USER || env.RESEND_FROM_EMAIL || env.OWNER_EMAIL;
+    if (env.GMAIL_SMTP_USER || env.GMAIL_SMTP_PASSWORD) {
+        return env.GMAIL_FROM_EMAIL || env.GMAIL_SMTP_USER || env.OWNER_EMAIL;
+    }
+    return env.RESEND_FROM_EMAIL || env.MAIL_FROM || env.OWNER_EMAIL || env.GMAIL_FROM_EMAIL || env.GMAIL_SMTP_USER;
 }
 
 function withTimeout(promise, ms, message) {

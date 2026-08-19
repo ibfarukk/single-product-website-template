@@ -444,7 +444,7 @@
                 window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
             } else {
                 if (shouldRetryVerification(data)) {
-                    pollPaymentStatus(reference, pkg, function() {
+                    pollPaymentStatus(reference, pkg, customerInfo, function() {
                         window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
                     }, function() {
                         window.location.href = 'payment-failed.html?ref=' + encodeURIComponent(reference);
@@ -457,7 +457,7 @@
         })
         .catch(function(err) {
             console.error('Payment verification error:', err);
-            pollPaymentStatus(reference, pkg, function() {
+            pollPaymentStatus(reference, pkg, customerInfo, function() {
                 window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
             }, function() {
                 showCheckoutModal(
@@ -573,29 +573,69 @@
         );
     }
 
-    function pollPaymentStatus(reference, pkg, onVerified, onFailed) {
+    function pollPaymentStatus(reference, pkg, customerInfo, onVerified, onFailed) {
         let attempts = 0;
-        const maxAttempts = 4;
+        const maxAttempts = 6;
+
+        function attemptVerify() {
+            return fetch(getApiUrl('/api/verify-payment'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reference: reference,
+                    package_id: pkg.id,
+                    expected_amount: pkg.price,
+                    currency: BUSINESS.currencyCode,
+                    customer: customerInfo
+                })
+            }).then(function(res) {
+                return res.json().catch(function() {
+                    return {
+                        success: false,
+                        error: 'Unable to read verification response',
+                        httpStatus: res.status
+                    };
+                }).then(function(data) {
+                    if (typeof data.httpStatus === 'undefined') {
+                        data.httpStatus = res.status;
+                    }
+                    return data;
+                });
+            });
+        }
 
         function check() {
             attempts += 1;
 
-            fetch(getApiUrl('/api/payment-status?ref=' + encodeURIComponent(reference)))
-                .then(function(res) {
-                    return res.json().catch(function() { return { success: false }; });
-                })
+            attemptVerify()
                 .then(function(data) {
-                    const record = data && data.record ? data.record : null;
-                    if (data.success && record && record.paymentStatus === 'verified') {
+                    if (data && data.success) {
                         onVerified();
                         return;
                     }
 
-                    if (attempts < maxAttempts) {
+                    if (shouldRetryVerification(data) && attempts < maxAttempts) {
                         window.setTimeout(check, 2000);
-                    } else {
-                        onFailed();
+                        return;
                     }
+
+                    return fetch(getApiUrl('/api/payment-status?ref=' + encodeURIComponent(reference)))
+                        .then(function(res) {
+                            return res.json().catch(function() { return { success: false }; });
+                        })
+                        .then(function(statusData) {
+                            const record = statusData && statusData.record ? statusData.record : null;
+                            if (statusData.success && record && record.paymentStatus === 'verified') {
+                                onVerified();
+                                return;
+                            }
+
+                            if (attempts < maxAttempts) {
+                                window.setTimeout(check, 2000);
+                            } else {
+                                onFailed();
+                            }
+                        });
                 })
                 .catch(function() {
                     if (attempts < maxAttempts) {
