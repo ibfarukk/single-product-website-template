@@ -432,6 +432,11 @@
                     error: 'Unable to read verification response',
                     httpStatus: res.status
                 };
+            }).then(function(data) {
+                if (typeof data.httpStatus === 'undefined') {
+                    data.httpStatus = res.status;
+                }
+                return data;
             });
         })
         .then(function(data) {
@@ -554,8 +559,13 @@
         return Boolean(
             data &&
             (
+                data.retryable === true ||
+                data.httpStatus === 404 ||
+                data.httpStatus === 409 ||
                 data.httpStatus >= 500 ||
                 errorText.includes('unable to read') ||
+                errorText.includes('pending') ||
+                errorText.includes('not found') ||
                 errorText.includes('configured') ||
                 errorText.includes('temporar') ||
                 errorText.includes('server')

@@ -155,11 +155,21 @@ async function handleVerifyPayment(request, env) {
             customer: customer,
             details: ['Reason: Transaction not found']
         });
-        return jsonResponse({ success: false, error: 'Transaction not found' });
+        return jsonResponse({ success: false, error: 'Transaction not found', retryable: true }, 404);
     }
 
     const transaction = verifyResult.data;
     if (!transaction || transaction.status !== 'success') {
+        const status = String(transaction && transaction.status ? transaction.status : 'unknown').toLowerCase();
+        if (status === 'pending' || status === 'ongoing' || status === 'processing' || status === 'queued' || status === 'unknown') {
+            return jsonResponse({
+                success: false,
+                error: 'Payment confirmation is still pending',
+                retryable: true,
+                transaction_status: status
+            }, 409);
+        }
+
         await updateOwnerStats(env, function(stats) {
             stats.failedSalesCount += 1;
         });
@@ -171,9 +181,9 @@ async function handleVerifyPayment(request, env) {
             amount: expected_amount,
             currency: currency,
             customer: customer,
-            details: ['Transaction status: ' + String(transaction && transaction.status ? transaction.status : 'unknown')]
+            details: ['Transaction status: ' + status]
         });
-        return jsonResponse({ success: false, error: 'Payment is not successful' }, 400);
+        return jsonResponse({ success: false, error: 'Payment is not successful', transaction_status: status }, 400);
     }
 
     // Verify amount (in kobo)
@@ -401,12 +411,12 @@ async function handleOwnerStats(request, env) {
             headers: {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*',
-                'WWW-Authenticate': 'Basic realm="Owner Dashboard"'
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization'
             }
         });
     }
 
-    const stats = await getOwnerStats(env);
+    const stats = await withTimeout(getOwnerStats(env), 8000, 'Loading owner stats timed out');
     return jsonResponse({
         success: true,
         stats: stats
@@ -460,12 +470,12 @@ async function verifyPaystackSignature(body, signature, secret) {
 // VERIFY PAYSTACK TRANSACTION
 // =========================================================
 async function verifyPaystackTransaction(reference, secret) {
-    const response = await fetch('https://api.paystack.co/transaction/verify/' + reference, {
+    const response = await withTimeout(fetch('https://api.paystack.co/transaction/verify/' + reference, {
         headers: {
             'Authorization': 'Bearer ' + secret,
             'Content-Type': 'application/json'
         }
-    });
+    }), 10000, 'Paystack verification request timed out');
 
     return await response.json();
 }
@@ -489,20 +499,27 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
     const customerSubject = 'Order Confirmation - ' + transaction.reference;
     const customerBody = buildCustomerEmail(transaction, method, customer);
 
-    await sendEmail(env, {
-        from: fromEmail,
-        to: ownerEmail,
-        subject: ownerSubject,
-        text: ownerBody
-    });
-
-    if (customerEmail) {
-        await sendEmail(env, {
+    const results = await Promise.allSettled([
+        sendEmail(env, {
+            from: fromEmail,
+            to: ownerEmail,
+            subject: ownerSubject,
+            text: ownerBody
+        }),
+        customerEmail ? sendEmail(env, {
             from: fromEmail,
             to: customerEmail,
             subject: customerSubject,
             text: customerBody
-        });
+        }) : Promise.resolve()
+    ]);
+
+    const emailErrors = results
+        .filter(function(result) { return result.status === 'rejected'; })
+        .map(function(result) { return result.reason && result.reason.message ? result.reason.message : String(result.reason); });
+
+    if (emailErrors.length) {
+        throw new Error(emailErrors.join(' | '));
     }
 }
 
@@ -526,24 +543,32 @@ async function sendManualOrderEmail(data, env) {
         });
     }
 
-    await sendEmail(env, {
-        from: fromEmail,
-        to: ownerEmail,
-        subject: subject,
-        text: body,
-        attachments: attachments
-    });
+    const customerSubject = 'Order Received - ' + data.order_ref;
+    const customerBody = buildManualCustomerEmail(data);
+    const customerEmail = data.customer && data.customer.email ? data.customer.email : '';
 
-    // Send confirmation to customer
-    if (data.customer && data.customer.email) {
-        const customerSubject = 'Order Received - ' + data.order_ref;
-        const customerBody = buildManualCustomerEmail(data);
-        await sendEmail(env, {
+    const results = await Promise.allSettled([
+        sendEmail(env, {
             from: fromEmail,
-            to: data.customer.email,
+            to: ownerEmail,
+            subject: subject,
+            text: body,
+            attachments: attachments
+        }),
+        customerEmail ? sendEmail(env, {
+            from: fromEmail,
+            to: customerEmail,
             subject: customerSubject,
             text: customerBody
-        });
+        }) : Promise.resolve()
+    ]);
+
+    const emailErrors = results
+        .filter(function(result) { return result.status === 'rejected'; })
+        .map(function(result) { return result.reason && result.reason.message ? result.reason.message : String(result.reason); });
+
+    if (emailErrors.length) {
+        throw new Error(emailErrors.join(' | '));
     }
 }
 
@@ -958,7 +983,7 @@ async function sendEmail(env, email) {
 
     if (smtpConfigured) {
         try {
-            await sendViaGmailSmtp(env, email);
+            await withTimeout(sendViaGmailSmtp(env, email), 15000, 'Gmail SMTP timed out');
             return { provider: 'gmail-smtp' };
         } catch (error) {
             smtpError = error;
@@ -968,7 +993,7 @@ async function sendEmail(env, email) {
 
     if (env.RESEND_API_KEY) {
         try {
-            await sendViaResend(env, email);
+            await withTimeout(sendViaResend(env, email), 15000, 'Resend send timed out');
             return { provider: 'resend' };
         } catch (error) {
             console.error('Resend fallback failed:', error && error.message ? error.message : error);
@@ -1233,6 +1258,17 @@ function extractEmailAddress(value) {
 
 function getFromEmail(env) {
     return env.MAIL_FROM || env.GMAIL_SMTP_USER || env.RESEND_FROM_EMAIL || env.OWNER_EMAIL;
+}
+
+function withTimeout(promise, ms, message) {
+    return Promise.race([
+        promise,
+        new Promise(function(_, reject) {
+            setTimeout(function() {
+                reject(new Error(message || 'Operation timed out'));
+            }, ms);
+        })
+    ]);
 }
 
 function base64Encode(value) {

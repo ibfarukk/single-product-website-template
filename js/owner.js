@@ -73,11 +73,19 @@
     }
 
     async function fetchStats(token) {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(function() {
+            controller.abort();
+        }, 10000);
+
         const response = await fetch(getApiUrl('/api/owner/stats'), {
             method: 'GET',
             headers: {
                 'Authorization': 'Basic ' + token
-            }
+            },
+            signal: controller.signal
+        }).finally(function() {
+            window.clearTimeout(timeoutId);
         });
 
         const data = await response.json().catch(function() {
@@ -127,7 +135,9 @@
             clearAuthToken();
             setView(false);
             setLoginFieldErrorState(true);
-            showError('owner-login-error', error.message || 'Invalid username or password. Please try again.');
+            showError('owner-login-error', error.name === 'AbortError'
+                ? 'Dashboard request timed out. Please confirm OWNER_STATS is bound and try again.'
+                : (error.message || 'Invalid username or password. Please try again.'));
         }
     }
 
@@ -152,7 +162,9 @@
                 setLoginFieldErrorState(false);
             } catch (error) {
                 setLoginFieldErrorState(true);
-                showError('owner-login-error', error.message || 'Invalid username or password. Please try again.');
+                showError('owner-login-error', error.name === 'AbortError'
+                    ? 'Dashboard request timed out. Please confirm OWNER_STATS is bound and try again.'
+                    : (error.message || 'Invalid username or password. Please try again.'));
             }
         });
 
