@@ -51,6 +51,11 @@ export default {
             return handleOwnerStats(request, env);
         }
 
+        // Public payment / order status lookup
+        if (path === '/api/payment-status' && request.method === 'GET') {
+            return handlePaymentStatus(request, env);
+        }
+
         return new Response(JSON.stringify({ error: 'Not Found' }), {
             status: 404,
             headers: corsHeaders
@@ -78,22 +83,34 @@ async function handlePaystackWebhook(request, env) {
 
     const event = JSON.parse(body);
 
-    // Prevent duplicate processing
     if (event.event === 'charge.success') {
         const reference = event.data.reference;
 
-        // Verify transaction with Paystack
         const verifyResult = await verifyPaystackTransaction(reference, secret);
         if (!verifyResult.status) {
             return jsonResponse({ error: 'Verification failed' }, 400);
         }
 
         const transaction = verifyResult.data;
+        if (!transaction || transaction.status !== 'success') {
+            return jsonResponse({ received: true, ignored: true, reason: 'Transaction not successful' });
+        }
 
-        // Send confirmation emails
-        await sendOrderEmails(transaction, env, 'paystack');
+        const customer = extractCustomerFromPaystackTransaction(transaction);
+        const result = await confirmPaystackPayment(env, {
+            transaction: transaction,
+            packageId: extractCustomFieldValue(transaction, 'package'),
+            expectedAmount: transaction.amount / 100,
+            currency: transaction.currency,
+            customer: customer,
+            source: 'webhook'
+        });
 
-        return jsonResponse({ success: true });
+        return jsonResponse({
+            success: true,
+            duplicate: result.duplicate === true,
+            source: 'webhook'
+        });
     }
 
     return jsonResponse({ received: true });
@@ -131,6 +148,22 @@ async function handleVerifyPayment(request, env) {
     }
 
     const transaction = verifyResult.data;
+    if (!transaction || transaction.status !== 'success') {
+        await updateOwnerStats(env, function(stats) {
+            stats.failedSalesCount += 1;
+        });
+        await sendOrderNotifications(env, {
+            event: 'paystack_attempt_failed',
+            title: 'Paystack payment not completed',
+            orderRef: reference,
+            packageId: package_id,
+            amount: expected_amount,
+            currency: currency,
+            customer: customer,
+            details: ['Transaction status: ' + String(transaction && transaction.status ? transaction.status : 'unknown')]
+        });
+        return jsonResponse({ success: false, error: 'Payment is not successful' }, 400);
+    }
 
     // Verify amount (in kobo)
     if (transaction.amount !== expected_amount * 100) {
@@ -174,24 +207,20 @@ async function handleVerifyPayment(request, env) {
         return jsonResponse({ success: false, error: 'Currency mismatch' });
     }
 
-    // Send emails
-    await sendOrderEmails(transaction, env, 'paystack', customer);
-    await updateOwnerStats(env, function(stats) {
-        stats.successfulSalesCount += 1;
-        stats.successfulSalesAmount += Number(expected_amount || 0);
-    });
-    await sendOrderNotifications(env, {
-        event: 'paystack_order_verified',
-        title: 'New Paystack order verified',
-        orderRef: transaction.reference,
+    const result = await confirmPaystackPayment(env, {
+        transaction: transaction,
         packageId: package_id,
-        amount: expected_amount,
+        expectedAmount: expected_amount,
         currency: currency,
         customer: customer,
-        details: ['Status: ' + (transaction.status || 'success')]
+        source: 'frontend_verify'
     });
 
-    return jsonResponse({ success: true });
+    return jsonResponse({
+        success: true,
+        duplicate: result.duplicate === true,
+        warnings: result.warnings || []
+    });
 }
 
 // =========================================================
@@ -239,32 +268,47 @@ async function handleManualOrder(request, env) {
         data = await request.json();
     }
 
-    // Send manual order notification
-    await sendManualOrderEmail(data, env);
-    await updateOwnerStats(env, function(stats) {
-        stats.manualOrdersCount += 1;
-        stats.manualOrdersAmount += Number(data.amount || 0);
-    });
-    await sendOrderNotifications(env, {
-        event: 'manual_order_received',
-        title: 'New manual order received',
-        orderRef: data.order_ref,
-        packageId: data.package_id,
-        amount: data.amount,
-        currency: data.currency,
-        customer: data.customer,
-        details: [
-            'Product: ' + (data.product || ''),
-            'Package: ' + (data.package_title || ''),
-            'Product type: ' + (data.product_type || 'physical'),
-            'Receipt attached: ' + (data.receipt ? 'Yes' : 'No')
-        ]
-    });
+    if (!data.order_ref) {
+        data.order_ref = 'MANUAL-' + Date.now();
+    }
+
+    const warnings = [];
+    await recordManualOrder(env, data);
+
+    try {
+        await sendManualOrderEmail(data, env);
+    } catch (error) {
+        warnings.push('manual_order_email_failed');
+        console.error('Manual order email failed:', error && error.message ? error.message : error);
+    }
+
+    try {
+        await sendOrderNotifications(env, {
+            event: 'manual_order_received',
+            title: 'New manual order received',
+            orderRef: data.order_ref,
+            packageId: data.package_id,
+            amount: data.amount,
+            currency: data.currency,
+            customer: data.customer,
+            details: [
+                'Product: ' + (data.product || ''),
+                'Package: ' + (data.package_title || ''),
+                'Product type: ' + (data.product_type || 'physical'),
+                'Receipt attached: ' + (data.receipt ? 'Yes' : 'No')
+            ]
+        });
+    } catch (error) {
+        warnings.push('manual_order_notification_failed');
+        console.error('Manual order notification failed:', error && error.message ? error.message : error);
+    }
 
     return jsonResponse({
         success: true,
         message: 'Order received',
-        receiptUploaded: Boolean(data.receipt)
+        status: 'manual_submitted',
+        receiptUploaded: Boolean(data.receipt),
+        warnings: warnings
     });
 }
 
@@ -355,6 +399,26 @@ async function handleOwnerStats(request, env) {
     return jsonResponse({
         success: true,
         stats: stats
+    });
+}
+
+async function handlePaymentStatus(request, env) {
+    const url = new URL(request.url);
+    const reference = String(url.searchParams.get('ref') || '').trim();
+
+    if (!reference) {
+        return jsonResponse({ success: false, error: 'Missing payment reference' }, 400);
+    }
+
+    const record = await getPaymentRecord(env, reference);
+    if (!record) {
+        return jsonResponse({ success: false, found: false, error: 'Payment record not found' }, 404);
+    }
+
+    return jsonResponse({
+        success: true,
+        found: true,
+        record: record
     });
 }
 
@@ -536,6 +600,167 @@ function isOwnerAuthorized(request, env) {
     }
 
     return { ok: false, error: 'Invalid username or password' };
+}
+
+async function confirmPaystackPayment(env, options) {
+    const transaction = options.transaction;
+    const reference = String(transaction && transaction.reference ? transaction.reference : '').trim();
+    const packageId = options.packageId || extractCustomFieldValue(transaction, 'package') || '';
+    const quantity = Number(extractCustomFieldValue(transaction, 'quantity') || 0);
+    const customer = normalizeCustomerInfo(options.customer || extractCustomerFromPaystackTransaction(transaction));
+    const amount = Number(options.expectedAmount || 0) || Number(transaction.amount || 0) / 100;
+    const currency = String(options.currency || transaction.currency || '').toUpperCase();
+    const existing = await getPaymentRecord(env, reference);
+    const warnings = [];
+
+    if (existing && existing.paymentStatus === 'verified') {
+        return { duplicate: true, warnings: existing.warnings || [] };
+    }
+
+    const record = {
+        reference: reference,
+        orderType: 'paystack',
+        paymentStatus: 'verified',
+        orderStatus: 'received',
+        packageId: packageId,
+        packageTitle: packageId,
+        quantity: quantity,
+        amount: amount,
+        currency: currency,
+        customer: customer,
+        transactionStatus: transaction.status || 'success',
+        source: options.source || 'frontend_verify',
+        verifiedAt: new Date().toISOString()
+    };
+
+    await putPaymentRecord(env, reference, record);
+    await updateOwnerStats(env, function(stats) {
+        stats.successfulSalesCount += 1;
+        stats.successfulSalesAmount += Number(amount || 0);
+    });
+
+    try {
+        await sendOrderEmails(transaction, env, 'paystack', customer);
+    } catch (error) {
+        warnings.push('paystack_email_failed');
+        console.error('Paystack order email failed:', error && error.message ? error.message : error);
+    }
+
+    try {
+        await sendOrderNotifications(env, {
+            event: 'paystack_order_verified',
+            title: 'New Paystack order verified',
+            orderRef: transaction.reference,
+            packageId: packageId,
+            amount: amount,
+            currency: currency,
+            customer: customer,
+            details: [
+                'Status: ' + (transaction.status || 'success'),
+                'Source: ' + (options.source || 'frontend_verify')
+            ]
+        });
+    } catch (error) {
+        warnings.push('paystack_notification_failed');
+        console.error('Paystack order notification failed:', error && error.message ? error.message : error);
+    }
+
+    if (warnings.length) {
+        record.warnings = warnings.slice();
+        await putPaymentRecord(env, reference, record);
+    }
+
+    return { duplicate: false, warnings: warnings };
+}
+
+async function recordManualOrder(env, data) {
+    const reference = String(data.order_ref || '').trim();
+    const existing = await getPaymentRecord(env, reference);
+    if (existing && existing.paymentStatus === 'manual_submitted') {
+        return existing;
+    }
+
+    const record = {
+        reference: reference,
+        orderType: 'manual',
+        paymentStatus: 'manual_submitted',
+        orderStatus: 'awaiting_manual_verification',
+        packageId: data.package_id || '',
+        packageTitle: data.package_title || '',
+        quantity: Number(data.quantity || 0),
+        amount: Number(data.amount || 0),
+        currency: data.currency || '',
+        customer: normalizeCustomerInfo(data.customer),
+        product: data.product || '',
+        productType: data.product_type || 'physical',
+        receiptUploaded: Boolean(data.receipt),
+        createdAt: new Date().toISOString()
+    };
+
+    await putPaymentRecord(env, reference, record);
+    await updateOwnerStats(env, function(stats) {
+        stats.manualOrdersCount += 1;
+        stats.manualOrdersAmount += Number(data.amount || 0);
+    });
+
+    return record;
+}
+
+async function getPaymentRecord(env, reference) {
+    if (!env.OWNER_STATS || !reference) {
+        return null;
+    }
+
+    return await env.OWNER_STATS.get('payment:' + reference, { type: 'json' });
+}
+
+async function putPaymentRecord(env, reference, record) {
+    if (!env.OWNER_STATS || !reference) {
+        return;
+    }
+
+    await env.OWNER_STATS.put('payment:' + reference, JSON.stringify(record));
+}
+
+function extractCustomFieldValue(transaction, variableName) {
+    const customFields = transaction && transaction.metadata && Array.isArray(transaction.metadata.custom_fields)
+        ? transaction.metadata.custom_fields
+        : [];
+    const field = customFields.find(function(item) {
+        return item && (item.variable_name === variableName || item.display_name === variableName);
+    });
+    return field ? field.value : '';
+}
+
+function extractCustomerFromPaystackTransaction(transaction) {
+    const customFields = transaction && transaction.metadata && Array.isArray(transaction.metadata.custom_fields)
+        ? transaction.metadata.custom_fields
+        : [];
+    const getField = function(variableName, displayName) {
+        const match = customFields.find(function(item) {
+            return item && (item.variable_name === variableName || item.display_name === displayName);
+        });
+        return match ? String(match.value || '') : '';
+    };
+
+    return {
+        name: getField('full_name', 'Full Name') || (transaction.customer && transaction.customer.first_name ? transaction.customer.first_name + ' ' + (transaction.customer.last_name || '') : ''),
+        email: transaction.customer && transaction.customer.email ? transaction.customer.email : '',
+        phone: getField('phone', 'Phone'),
+        address: getField('address', 'Address')
+    };
+}
+
+function normalizeCustomerInfo(customer) {
+    return {
+        name: customer && customer.name ? String(customer.name) : '',
+        email: customer && customer.email ? String(customer.email) : '',
+        phone: customer && customer.phone ? String(customer.phone) : '',
+        address: customer && customer.address ? String(customer.address) : '',
+        state: customer && customer.state ? String(customer.state) : '',
+        city: customer && customer.city ? String(customer.city) : '',
+        specialRequest: customer && customer.specialRequest ? String(customer.specialRequest) : ''
+    };
 }
 
 // =========================================================

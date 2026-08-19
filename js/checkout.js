@@ -425,20 +425,41 @@
                 customer: customerInfo
             })
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+            return res.json().catch(function() {
+                return {
+                    success: false,
+                    error: 'Unable to read verification response',
+                    httpStatus: res.status
+                };
+            });
+        })
         .then(function(data) {
             if (data.success) {
                 window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
             } else {
+                if (shouldRetryVerification(data)) {
+                    pollPaymentStatus(reference, pkg, function() {
+                        window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
+                    }, function() {
+                        window.location.href = 'payment-failed.html?ref=' + encodeURIComponent(reference);
+                    });
+                    return;
+                }
+
                 window.location.href = 'payment-failed.html?ref=' + encodeURIComponent(reference);
             }
         })
         .catch(function(err) {
             console.error('Payment verification error:', err);
-            showCheckoutModal(
-                'Payment Verification Failed',
-                'We could not confirm your payment with the server. Please wait a moment and try again, or contact support with your payment reference.'
-            );
+            pollPaymentStatus(reference, pkg, function() {
+                window.location.href = 'success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg.id);
+            }, function() {
+                showCheckoutModal(
+                    'Payment Verification Delayed',
+                    'We could not confirm your payment immediately. Please wait a few moments and try again, or contact support with your payment reference.'
+                );
+            });
         })
         .finally(function() {
             restoreSubmitState();
@@ -526,6 +547,56 @@
         const timestamp = Date.now().toString(36).toUpperCase();
         const random = Math.random().toString(36).substring(2, 6).toUpperCase();
         return prefix + '-' + timestamp + random;
+    }
+
+    function shouldRetryVerification(data) {
+        const errorText = String(data && data.error ? data.error : '').toLowerCase();
+        return Boolean(
+            data &&
+            (
+                data.httpStatus >= 500 ||
+                errorText.includes('unable to read') ||
+                errorText.includes('configured') ||
+                errorText.includes('temporar') ||
+                errorText.includes('server')
+            )
+        );
+    }
+
+    function pollPaymentStatus(reference, pkg, onVerified, onFailed) {
+        let attempts = 0;
+        const maxAttempts = 4;
+
+        function check() {
+            attempts += 1;
+
+            fetch(getApiUrl('/api/payment-status?ref=' + encodeURIComponent(reference)))
+                .then(function(res) {
+                    return res.json().catch(function() { return { success: false }; });
+                })
+                .then(function(data) {
+                    const record = data && data.record ? data.record : null;
+                    if (data.success && record && record.paymentStatus === 'verified') {
+                        onVerified();
+                        return;
+                    }
+
+                    if (attempts < maxAttempts) {
+                        window.setTimeout(check, 2000);
+                    } else {
+                        onFailed();
+                    }
+                })
+                .catch(function() {
+                    if (attempts < maxAttempts) {
+                        window.setTimeout(check, 2000);
+                    } else {
+                        onFailed();
+                    }
+                });
+        }
+
+        check();
     }
 
     // =========================================================
