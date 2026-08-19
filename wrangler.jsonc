@@ -1,11 +1,11 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "pmelab-worker",
-  "main": "src/index.js",
-  "compatibility_date": "2026-08-16",
+  "$schema": "./worker/node_modules/wrangler/config-schema.json",
+  "name": "single-product-website-template",
+  "main": "./worker/src/index.js",
+  "compatibility_date": "2026-08-19",
   "workers_dev": true,
   "assets": {
-    "directory": "..",
+    "directory": ".",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
     "run_worker_first": [

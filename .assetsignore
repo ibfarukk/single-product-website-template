@@ -1,0 +1,5 @@
+worker/
+*.md
+.git/
+.gitignore
+.assetsignore

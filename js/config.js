@@ -68,7 +68,7 @@ const BUSINESS = {
 // - visitor tracking
 // - owner dashboard stats
 // =========================================================
-const API_BASE_URL = "https://single-product-website-template.isahbalafaruk.workers.dev";
+const API_BASE_URL = "";
 
 // =========================================================
 // 2. BRAND CONFIGURATION

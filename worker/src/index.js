@@ -56,6 +56,17 @@ export default {
             return handlePaymentStatus(request, env);
         }
 
+        if (path.startsWith('/api/')) {
+            return new Response(JSON.stringify({ error: 'Not Found' }), {
+                status: 404,
+                headers: corsHeaders
+            });
+        }
+
+        if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
+            return env.ASSETS.fetch(request);
+        }
+
         return new Response(JSON.stringify({ error: 'Not Found' }), {
             status: 404,
             headers: corsHeaders
