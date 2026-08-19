@@ -431,9 +431,35 @@ async function handlePaymentStatus(request, env) {
         return jsonResponse({ success: false, error: 'Missing payment reference' }, 400);
     }
 
-    const record = await getPaymentRecord(env, reference);
+    let record = await getPaymentRecord(env, reference);
+
+    if (!record && env.PAYSTACK_SECRET_KEY) {
+        try {
+            const verifyResult = await verifyPaystackTransaction(reference, env.PAYSTACK_SECRET_KEY);
+            if (verifyResult && verifyResult.status && verifyResult.data && verifyResult.data.status === 'success') {
+                const transaction = verifyResult.data;
+                await confirmPaystackPayment(env, {
+                    transaction: transaction,
+                    packageId: extractCustomFieldValue(transaction, 'package'),
+                    expectedAmount: transaction.amount / 100,
+                    currency: transaction.currency,
+                    customer: extractCustomerFromPaystackTransaction(transaction),
+                    source: 'status_lookup'
+                });
+                record = await getPaymentRecord(env, reference);
+            }
+        } catch (error) {
+            return jsonResponse({
+                success: false,
+                found: false,
+                retryable: true,
+                error: error && error.message ? error.message : 'Status check failed'
+            }, 409);
+        }
+    }
+
     if (!record) {
-        return jsonResponse({ success: false, found: false, error: 'Payment record not found' }, 404);
+        return jsonResponse({ success: false, found: false, retryable: true, error: 'Payment record not found' }, 404);
     }
 
     return jsonResponse({

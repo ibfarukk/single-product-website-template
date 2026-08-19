@@ -64,6 +64,20 @@
             width: 100%;
             justify-content: center;
         }
+        .failed-status {
+            display: none;
+            margin: 0 0 20px;
+            padding: 14px 16px;
+            border-radius: var(--radius);
+            background: var(--surface);
+            border: 1px solid var(--border-light);
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+        .failed-status.active {
+            display: block;
+        }
         @media (max-width: 480px) {
             .failed-card {
                 padding: 32px 24px;
@@ -82,6 +96,7 @@
             </div>
             <h1>PAYMENT NOT COMPLETED</h1>
             <p>Your payment was not completed. This could be due to a network issue, insufficient funds, or cancellation. You can try again or choose another payment method.</p>
+            <div class="failed-status" id="payment-recheck-status"></div>
 
             <div class="failed-buttons">
                 <a href="index.html#checkout" class="btn btn-primary">
@@ -102,5 +117,66 @@
 
     <script src="js/config.js"></script>
     <script src="js/whatsapp.js"></script>
+    <script>
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const reference = String(params.get('ref') || '').trim();
+            const statusBox = document.getElementById('payment-recheck-status');
+
+            function getApiUrl(path) {
+                const cleanPath = path.startsWith('/') ? path : '/' + path;
+                const base = typeof API_BASE_URL !== 'undefined' ? String(API_BASE_URL).trim() : '';
+                if (!base) return cleanPath;
+                return base.replace(/\/+$/, '') + cleanPath;
+            }
+
+            function setStatus(message) {
+                if (!statusBox) return;
+                statusBox.textContent = message;
+                statusBox.classList.add('active');
+            }
+
+            if (!reference) return;
+
+            let attempts = 0;
+            const maxAttempts = 6;
+
+            function checkStatus() {
+                attempts += 1;
+                setStatus('We are rechecking your payment confirmation. Please wait...');
+
+                fetch(getApiUrl('/api/payment-status?ref=' + encodeURIComponent(reference)))
+                    .then(function(res) {
+                        return res.json().catch(function() {
+                            return { success: false, retryable: true };
+                        });
+                    })
+                    .then(function(data) {
+                        const record = data && data.record ? data.record : null;
+                        if (data.success && record && record.paymentStatus === 'verified') {
+                            const pkg = record.packageId || params.get('pkg') || 'single';
+                            window.location.replace('success.html?ref=' + encodeURIComponent(reference) + '&pkg=' + encodeURIComponent(pkg));
+                            return;
+                        }
+
+                        if (attempts < maxAttempts && (!data || data.retryable !== false)) {
+                            window.setTimeout(checkStatus, 2000);
+                            return;
+                        }
+
+                        setStatus('We could not confirm this payment automatically yet. If you already paid successfully, please wait a moment and try again.');
+                    })
+                    .catch(function() {
+                        if (attempts < maxAttempts) {
+                            window.setTimeout(checkStatus, 2000);
+                            return;
+                        }
+                        setStatus('We could not confirm this payment automatically yet. If you already paid successfully, please wait a moment and try again.');
+                    });
+            }
+
+            window.setTimeout(checkStatus, 800);
+        })();
+    </script>
 </body>
 </html>
