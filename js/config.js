@@ -40,7 +40,7 @@ you are doing.
 // =========================================================
 const BUSINESS = {
     name: "PMELAB TECHNOLOGY LIMITED",
-    shortName: "PMELAB",
+    shortName: "PMELAB STORE",
     phone: "+2347040616209",
     email: "support@paymelab.com",
     address: "Office No. 9, Achida Plaza, Opposite JEFLA, Beside AA RANO Filling Station, Kpakungu, Minna, Niger State, Nigeria.",
@@ -122,7 +122,7 @@ const PRODUCT = {
 // Order Now
 // COMPLETE YOUR ORDER
 // =========================================================
-const PRODUCT_TYPE = "digital";
+const PRODUCT_TYPE = "physical";
 
 // =========================================================
 // 4. PRODUCT IMAGES (Up to 10)
@@ -196,7 +196,7 @@ const PRODUCT_VIDEOS = [
     {
         enabled: true,
         title: "See the PMELAB Power Bank in Action",
-        url: "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+        url: "https://www.youtube.com/watch?v=ocsR6dbYBGQ"
     },
     {
         enabled: true,
@@ -341,7 +341,7 @@ const SPECIFICATIONS = [
 const PACKAGES = [
     {
         id: "single",
-        title: "BUY 1",
+        title: "PRODUCT PACKAGE 1",
         quantity: 1,
         price: 25000,
         oldPrice: 35000,
@@ -351,7 +351,7 @@ const PACKAGES = [
     },
     {
         id: "double",
-        title: "BUY 2",
+        title: "PRODUCT PACKAGE 2",
         quantity: 2,
         price: 45000,
         oldPrice: 70000,
@@ -361,7 +361,7 @@ const PACKAGES = [
     },
     {
         id: "triple",
-        title: "BUY 3",
+        title: "PRODUCT PACKAGE 3",
         quantity: 3,
         price: 60000,
         oldPrice: 105000,
@@ -621,9 +621,9 @@ const WHATSAPP_NUMBERS = [
         number: "2347040616209"
     },
     {
-        enabled: false,
+        enabled: true,
         label: "Sales 2",
-        number: ""
+        number: "2348137483459"
     },
     {
         enabled: false,
@@ -651,7 +651,7 @@ const PAYMENT = {
     paystackEnabled: true, // Set to false to hide Paystack
     manualEnabled: true, // Set to false to hide Manual Bank Transfer
     manualReceiptRequired: true, // Set to false if receipt upload should be optional
-    paystackPublicKey: "pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    paystackPublicKey: "pk_test_d81cbc3f5d3f34ad13bb5b6626b869bb4545b02a",
     currency: "NGN"
 };
 
@@ -943,7 +943,7 @@ const SALES_POPUP = {
 // If you enable it later, keep the offer honest and time-bound.
 // =========================================================
 const PROMOTION = {
-    enabled: false,
+    enabled: true,
     title: "Weekend Power Deal",
     description: "Save more when you buy 2 or 3 units this weekend only.",
     endDate: "2026-12-31"
@@ -955,7 +955,7 @@ const PROMOTION = {
 // Use real photos from happy customers or product usage.
 // =========================================================
 const SOCIAL_PROOF_GALLERY = {
-    enabled: false,
+    enabled: true,
     title: "Customer Moments",
     description: "See how our customers use their PMELAB Power Bank.",
     images: [
