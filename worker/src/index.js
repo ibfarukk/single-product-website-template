@@ -595,16 +595,26 @@ function getPaystackFailureHint(message) {
 function handleHealthCheck(env) {
     const username = env.OWNER_DASHBOARD_USERNAME || env.OWNER_USERNAME;
     const password = env.OWNER_DASHBOARD_PASSWORD || env.OWNER_PASSWORD;
+    const checks = {
+        ownerStatsBound: Boolean(env.OWNER_STATS),
+        paystackSecretConfigured: Boolean(env.PAYSTACK_SECRET_KEY),
+        ownerEmailConfigured: Boolean(env.OWNER_EMAIL),
+        ownerDashboardCredsConfigured: Boolean(username && password),
+        gmailSmtpConfigured: Boolean(env.GMAIL_SMTP_USER && env.GMAIL_SMTP_PASSWORD),
+        resendConfigured: Boolean(env.RESEND_API_KEY)
+    };
+    const missing = Object.keys(checks).filter(function(key) { return checks[key] === false; });
+    let availableKeys = [];
+    try {
+        availableKeys = Object.keys(env || {}).sort();
+    } catch (error) {
+        availableKeys = [];
+    }
     return jsonResponse({
         success: true,
-        checks: {
-            ownerStatsBound: Boolean(env.OWNER_STATS),
-            paystackSecretConfigured: Boolean(env.PAYSTACK_SECRET_KEY),
-            ownerEmailConfigured: Boolean(env.OWNER_EMAIL),
-            ownerDashboardCredsConfigured: Boolean(username && password),
-            gmailSmtpConfigured: Boolean(env.GMAIL_SMTP_USER && env.GMAIL_SMTP_PASSWORD),
-            resendConfigured: Boolean(env.RESEND_API_KEY)
-        }
+        checks: checks,
+        missing: missing,
+        availableKeys: availableKeys
     });
 }
 
