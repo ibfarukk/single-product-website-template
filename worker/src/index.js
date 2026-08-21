@@ -56,6 +56,10 @@ export default {
             return handlePaymentStatus(request, env);
         }
 
+        if (path === '/api/health' && request.method === 'GET') {
+            return handleHealthCheck(env);
+        }
+
         if (path.startsWith('/api/')) {
             return new Response(JSON.stringify({ error: 'Not Found' }), {
                 status: 404,
@@ -131,117 +135,145 @@ async function handlePaystackWebhook(request, env) {
 // VERIFY PAYMENT (Called from frontend)
 // =========================================================
 async function handleVerifyPayment(request, env) {
-    const secret = env.PAYSTACK_SECRET_KEY;
-    if (!secret) {
-        return jsonResponse({ error: 'Payment not configured' }, 500);
-    }
-
-    const data = await request.json();
-    const { reference, package_id, expected_amount, currency, customer } = data;
-
-    // Verify with Paystack
-    const verifyResult = await verifyPaystackTransaction(reference, secret);
-    if (!verifyResult.status) {
-        await updateOwnerStats(env, function(stats) {
-            stats.failedSalesCount += 1;
-        });
-        await sendOrderNotifications(env, {
-            event: 'paystack_attempt_failed',
-            title: 'Paystack verification failed',
-            orderRef: reference,
-            packageId: package_id,
-            amount: expected_amount,
-            currency: currency,
-            customer: customer,
-            details: ['Reason: Transaction not found']
-        });
-        return jsonResponse({ success: false, error: 'Transaction not found', retryable: true }, 404);
-    }
-
-    const transaction = verifyResult.data;
-    if (!transaction || transaction.status !== 'success') {
-        const status = String(transaction && transaction.status ? transaction.status : 'unknown').toLowerCase();
-        if (status === 'pending' || status === 'ongoing' || status === 'processing' || status === 'queued' || status === 'unknown') {
-            return jsonResponse({
-                success: false,
-                error: 'Payment confirmation is still pending',
-                retryable: true,
-                transaction_status: status
-            }, 409);
+    try {
+        const secret = env.PAYSTACK_SECRET_KEY;
+        if (!secret) {
+            return jsonResponse({ success: false, error: 'Payment not configured. Missing PAYSTACK_SECRET_KEY.', retryable: false }, 503);
         }
 
-        await updateOwnerStats(env, function(stats) {
-            stats.failedSalesCount += 1;
-        });
-        await sendOrderNotifications(env, {
-            event: 'paystack_attempt_failed',
-            title: 'Paystack payment not completed',
-            orderRef: reference,
+        const data = await request.json();
+        const { reference, package_id, expected_amount, currency, customer } = data;
+        const expectedAmount = Number(expected_amount || 0);
+        const expectedCurrency = String(currency || '').toUpperCase();
+
+        const verifyResult = await verifyPaystackTransaction(reference, secret);
+        if (!verifyResult.status) {
+            const message = String(verifyResult.message || 'Transaction not found');
+            const hint = getPaystackFailureHint(message);
+            const retryable = isRetryablePaystackFailure(message);
+
+            if (retryable) {
+                return jsonResponse({
+                    success: false,
+                    error: message,
+                    retryable: true,
+                    hint: hint || undefined
+                }, 409);
+            }
+
+            await updateOwnerStats(env, function(stats) {
+                stats.failedSalesCount += 1;
+            });
+            await sendOrderNotifications(env, {
+                event: 'paystack_attempt_failed',
+                title: 'Paystack verification failed',
+                orderRef: reference,
+                packageId: package_id,
+                amount: expectedAmount,
+                currency: expectedCurrency,
+                customer: customer,
+                details: ['Reason: ' + message].concat(hint ? ['Hint: ' + hint] : [])
+            });
+            return jsonResponse({
+                success: false,
+                error: message,
+                retryable: false,
+                hint: hint || undefined
+            }, 404);
+        }
+
+        const transaction = verifyResult.data;
+        if (!transaction || transaction.status !== 'success') {
+            const status = String(transaction && transaction.status ? transaction.status : 'unknown').toLowerCase();
+            if (status === 'pending' || status === 'ongoing' || status === 'processing' || status === 'queued' || status === 'unknown') {
+                return jsonResponse({
+                    success: false,
+                    error: 'Payment confirmation is still pending',
+                    retryable: true,
+                    transaction_status: status
+                }, 409);
+            }
+
+            await updateOwnerStats(env, function(stats) {
+                stats.failedSalesCount += 1;
+            });
+            await sendOrderNotifications(env, {
+                event: 'paystack_attempt_failed',
+                title: 'Paystack payment not completed',
+                orderRef: reference,
+                packageId: package_id,
+                amount: expectedAmount,
+                currency: expectedCurrency,
+                customer: customer,
+                details: ['Transaction status: ' + status]
+            });
+            return jsonResponse({ success: false, error: 'Payment is not successful', transaction_status: status, retryable: false }, 400);
+        }
+
+        const expectedKobo = Math.round(expectedAmount * 100);
+        const receivedKobo = Number(transaction.amount || 0);
+        if (receivedKobo !== expectedKobo) {
+            await updateOwnerStats(env, function(stats) {
+                stats.failedSalesCount += 1;
+            });
+            await sendOrderNotifications(env, {
+                event: 'paystack_attempt_failed',
+                title: 'Paystack amount mismatch',
+                orderRef: reference,
+                packageId: package_id,
+                amount: expectedAmount,
+                currency: expectedCurrency,
+                customer: customer,
+                details: [
+                    'Expected: ' + expectedAmount + ' ' + expectedCurrency,
+                    'Received: ' + (receivedKobo / 100) + ' ' + String(transaction.currency || '').toUpperCase()
+                ]
+            });
+            return jsonResponse({ success: false, error: 'Amount mismatch', retryable: false }, 400);
+        }
+
+        const receivedCurrency = String(transaction.currency || '').toUpperCase();
+        if (receivedCurrency !== expectedCurrency) {
+            await updateOwnerStats(env, function(stats) {
+                stats.failedSalesCount += 1;
+            });
+            await sendOrderNotifications(env, {
+                event: 'paystack_attempt_failed',
+                title: 'Paystack currency mismatch',
+                orderRef: reference,
+                packageId: package_id,
+                amount: expectedAmount,
+                currency: expectedCurrency,
+                customer: customer,
+                details: [
+                    'Expected currency: ' + expectedCurrency,
+                    'Received currency: ' + receivedCurrency
+                ]
+            });
+            return jsonResponse({ success: false, error: 'Currency mismatch', retryable: false }, 400);
+        }
+
+        const result = await confirmPaystackPayment(env, {
+            transaction: transaction,
             packageId: package_id,
-            amount: expected_amount,
-            currency: currency,
+            expectedAmount: expectedAmount,
+            currency: expectedCurrency,
             customer: customer,
-            details: ['Transaction status: ' + status]
+            source: 'frontend_verify'
         });
-        return jsonResponse({ success: false, error: 'Payment is not successful', transaction_status: status }, 400);
+
+        return jsonResponse({
+            success: true,
+            duplicate: result.duplicate === true,
+            warnings: result.warnings || []
+        });
+    } catch (error) {
+        return jsonResponse({
+            success: false,
+            error: error && error.message ? error.message : 'Verification failed',
+            retryable: true
+        }, 502);
     }
-
-    // Verify amount (in kobo)
-    if (transaction.amount !== expected_amount * 100) {
-        await updateOwnerStats(env, function(stats) {
-            stats.failedSalesCount += 1;
-        });
-        await sendOrderNotifications(env, {
-            event: 'paystack_attempt_failed',
-            title: 'Paystack amount mismatch',
-            orderRef: reference,
-            packageId: package_id,
-            amount: expected_amount,
-            currency: currency,
-            customer: customer,
-            details: [
-                'Expected: ' + expected_amount + ' ' + currency,
-                'Received: ' + (transaction.amount / 100) + ' ' + transaction.currency
-            ]
-        });
-        return jsonResponse({ success: false, error: 'Amount mismatch' });
-    }
-
-    // Verify currency
-    if (transaction.currency !== currency) {
-        await updateOwnerStats(env, function(stats) {
-            stats.failedSalesCount += 1;
-        });
-        await sendOrderNotifications(env, {
-            event: 'paystack_attempt_failed',
-            title: 'Paystack currency mismatch',
-            orderRef: reference,
-            packageId: package_id,
-            amount: expected_amount,
-            currency: currency,
-            customer: customer,
-            details: [
-                'Expected currency: ' + currency,
-                'Received currency: ' + transaction.currency
-            ]
-        });
-        return jsonResponse({ success: false, error: 'Currency mismatch' });
-    }
-
-    const result = await confirmPaystackPayment(env, {
-        transaction: transaction,
-        packageId: package_id,
-        expectedAmount: expected_amount,
-        currency: currency,
-        customer: customer,
-        source: 'frontend_verify'
-    });
-
-    return jsonResponse({
-        success: true,
-        duplicate: result.duplicate === true,
-        warnings: result.warnings || []
-    });
 }
 
 // =========================================================
@@ -447,6 +479,20 @@ async function handlePaymentStatus(request, env) {
                     source: 'status_lookup'
                 });
                 record = await getPaymentRecord(env, reference);
+            } else if (verifyResult && verifyResult.status && verifyResult.data) {
+                return jsonResponse({
+                    success: false,
+                    found: false,
+                    retryable: true,
+                    error: 'Payment status is ' + String(verifyResult.data.status || 'unknown')
+                }, 409);
+            } else if (verifyResult && !verifyResult.status) {
+                return jsonResponse({
+                    success: false,
+                    found: false,
+                    retryable: false,
+                    error: String(verifyResult.message || 'Transaction not found')
+                }, 404);
             }
         } catch (error) {
             return jsonResponse({
@@ -503,7 +549,63 @@ async function verifyPaystackTransaction(reference, secret) {
         }
     }), 10000, 'Paystack verification request timed out');
 
-    return await response.json();
+    const payload = await response.json().catch(function() {
+        return {
+            status: false,
+            message: 'Unable to read Paystack verification response'
+        };
+    });
+
+    if (!response.ok && payload && typeof payload.status === 'undefined') {
+        payload.status = false;
+    }
+
+    if (!payload.message && !response.ok) {
+        payload.message = 'Paystack verification failed with HTTP ' + response.status;
+    }
+
+    return payload;
+}
+
+function isRetryablePaystackFailure(message) {
+    const text = String(message || '').toLowerCase();
+    return Boolean(
+        text.includes('timeout') ||
+        text.includes('timed out') ||
+        text.includes('temporar') ||
+        text.includes('network') ||
+        text.includes('unable to read') ||
+        text.includes('try again') ||
+        text.includes('gateway') ||
+        text.includes('server') ||
+        text.includes('rate limit') ||
+        text.includes('transaction not found') ||
+        text.includes('not found')
+    );
+}
+
+function getPaystackFailureHint(message) {
+    const text = String(message || '').toLowerCase();
+    if (text.includes('invalid key') || text.includes('authorization') || text.includes('transaction not found')) {
+        return 'Confirm PAYSTACK_SECRET_KEY matches the Paystack public key mode (both test or both live) and is set on the deployed Worker.';
+    }
+    return '';
+}
+
+function handleHealthCheck(env) {
+    const username = env.OWNER_DASHBOARD_USERNAME || env.OWNER_USERNAME;
+    const password = env.OWNER_DASHBOARD_PASSWORD || env.OWNER_PASSWORD;
+    return jsonResponse({
+        success: true,
+        checks: {
+            ownerStatsBound: Boolean(env.OWNER_STATS),
+            paystackSecretConfigured: Boolean(env.PAYSTACK_SECRET_KEY),
+            ownerEmailConfigured: Boolean(env.OWNER_EMAIL),
+            ownerDashboardCredsConfigured: Boolean(username && password),
+            gmailSmtpConfigured: Boolean(env.GMAIL_SMTP_USER && env.GMAIL_SMTP_PASSWORD),
+            resendConfigured: Boolean(env.RESEND_API_KEY)
+        }
+    });
 }
 
 // =========================================================
@@ -511,8 +613,6 @@ async function verifyPaystackTransaction(reference, secret) {
 // =========================================================
 async function sendOrderEmails(transaction, env, method, customerInfo) {
     const ownerEmail = env.OWNER_EMAIL;
-    if (!ownerEmail) return;
-
     const customer = customerInfo || (transaction.metadata ? transaction.metadata.custom_fields : []);
     const customerEmail = transaction.customer ? transaction.customer.email : '';
     const fromEmail = getFromEmail(env);
@@ -525,20 +625,26 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
     const customerSubject = 'Order Confirmation - ' + transaction.reference;
     const customerBody = buildCustomerEmail(transaction, method, customer);
 
-    const results = await Promise.allSettled([
-        sendEmail(env, {
+    const jobs = [];
+    if (ownerEmail) {
+        jobs.push(sendEmail(env, {
             from: fromEmail,
             to: ownerEmail,
             subject: ownerSubject,
             text: ownerBody
-        }),
-        customerEmail ? sendEmail(env, {
+        }));
+    }
+    if (customerEmail) {
+        jobs.push(sendEmail(env, {
             from: fromEmail,
             to: customerEmail,
             subject: customerSubject,
             text: customerBody
-        }) : Promise.resolve()
-    ]);
+        }));
+    }
+    if (!jobs.length) return;
+
+    const results = await Promise.allSettled(jobs);
 
     const emailErrors = results
         .filter(function(result) { return result.status === 'rejected'; })
@@ -554,7 +660,6 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
 // =========================================================
 async function sendManualOrderEmail(data, env) {
     const ownerEmail = env.OWNER_EMAIL;
-    if (!ownerEmail) return;
 
     const subject = 'NEW MANUAL PAYMENT ORDER - ' + data.order_ref;
     const body = buildManualOrderEmail(data);
@@ -573,21 +678,27 @@ async function sendManualOrderEmail(data, env) {
     const customerBody = buildManualCustomerEmail(data);
     const customerEmail = data.customer && data.customer.email ? data.customer.email : '';
 
-    const results = await Promise.allSettled([
-        sendEmail(env, {
+    const jobs = [];
+    if (ownerEmail) {
+        jobs.push(sendEmail(env, {
             from: fromEmail,
             to: ownerEmail,
             subject: subject,
             text: body,
             attachments: attachments
-        }),
-        customerEmail ? sendEmail(env, {
+        }));
+    }
+    if (customerEmail) {
+        jobs.push(sendEmail(env, {
             from: fromEmail,
             to: customerEmail,
             subject: customerSubject,
             text: customerBody
-        }) : Promise.resolve()
-    ]);
+        }));
+    }
+    if (!jobs.length) return;
+
+    const results = await Promise.allSettled(jobs);
 
     const emailErrors = results
         .filter(function(result) { return result.status === 'rejected'; })
