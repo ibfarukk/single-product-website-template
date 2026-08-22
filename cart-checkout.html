@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cart Checkout</title>
+    <link rel="icon" type="image/jpeg" href="productsimages/logo.jpg">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <script src="js/site_selector.js"></script>
+    <script src="js/site_content.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="container header-inner">
+            <a href="index.html" class="logo" data-nav-products>
+                <img src="productsimages/logo.jpg" alt="Logo" loading="eager">
+            </a>
+
+            <nav class="nav-desktop">
+                <a href="index.html" data-nav-products class="nav-link">Products</a>
+                <a href="about.html" class="nav-link">About</a>
+                <a href="contact.html" class="nav-link">Contact</a>
+                <a href="refund-policy.html" class="nav-link">Refund Policy</a>
+                <a href="refund-form.html" class="nav-link">Refund Form</a>
+            </nav>
+
+            <button class="mobile-menu-btn" aria-label="Toggle menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </header>
+
+    <nav class="mobile-nav">
+        <a href="index.html" data-nav-products>Products</a>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="refund-policy.html">Refund Policy</a>
+        <a href="refund-form.html">Refund Form</a>
+    </nav>
+
+    <main id="home">
+        <section class="hero" style="padding-bottom: 40px;">
+            <div class="container hero-inner" style="grid-template-columns: 1fr;">
+                <div class="hero-content" style="max-width: 820px;">
+                    <div class="hero-badge">CART</div>
+                    <h1 class="hero-title" id="cart-checkout-title">Cart Checkout</h1>
+                    <p class="hero-desc" id="cart-checkout-desc">Pay for all items in your cart with one checkout.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="checkout" style="padding-top: 0;">
+            <div class="container">
+                <div id="cart-checkout-error" class="owner-hidden" style="padding:14px;border:1px solid rgba(220,38,38,0.35);background:rgba(220,38,38,0.06);border-radius:16px;margin-bottom:16px;"></div>
+
+                <div class="checkout-grid">
+                    <form class="checkout-form" id="cart-checkout-form">
+                        <h3 style="font-size: 1.2rem; margin-bottom: 20px;">Customer Information</h3>
+
+                        <div class="form-group">
+                            <label for="cart-name">Full Name</label>
+                            <input id="cart-name" name="customer_name" type="text" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cart-email">Email</label>
+                            <input id="cart-email" name="customer_email" type="email" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cart-phone">Phone</label>
+                            <input id="cart-phone" name="customer_phone" type="tel" required>
+                        </div>
+
+                        <div class="form-group" id="cart-address-group">
+                            <label for="cart-address">Delivery Address</label>
+                            <input id="cart-address" name="customer_address" type="text">
+                        </div>
+
+                        <div class="form-row" id="cart-location-row">
+                            <div class="form-group">
+                                <label for="cart-state">State</label>
+                                <input id="cart-state" name="customer_state" type="text">
+                            </div>
+                            <div class="form-group">
+                                <label for="cart-city">City</label>
+                                <input id="cart-city" name="customer_city" type="text">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cart-special">Special Request (Optional)</label>
+                            <textarea id="cart-special" name="customer_special_request" rows="3"></textarea>
+                        </div>
+
+                        <div class="form-group" id="cart-payment-method-group">
+                            <label>Payment Method</label>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                <label style="display:flex;gap:8px;align-items:center;">
+                                    <input type="radio" name="payment_method" value="paystack" checked>
+                                    <span>Paystack</span>
+                                </label>
+                                <label style="display:flex;gap:8px;align-items:center;">
+                                    <input type="radio" name="payment_method" value="manual">
+                                    <span>Manual Transfer</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div id="cart-manual-details" class="owner-hidden" style="border:1px solid var(--border);border-radius:16px;padding:16px;background:#fff;">
+                            <div style="font-weight:800;margin-bottom:8px;">Bank Details</div>
+                            <div style="display:grid;gap:6px;font-size:0.95rem;">
+                                <div><span style="color:var(--muted);">Bank:</span> <span id="cart-manual-bank"></span></div>
+                                <div><span style="color:var(--muted);">Account Name:</span> <span id="cart-manual-account-name"></span></div>
+                                <div><span style="color:var(--muted);">Account Number:</span> <span id="cart-manual-account-number"></span></div>
+                                <div id="cart-manual-deadline" style="color:var(--muted);"></div>
+                            </div>
+                            <div class="form-group" style="margin-top:14px;">
+                                <label for="cart-receipt">Upload Receipt</label>
+                                <input id="cart-receipt" type="file" accept="image/*,application/pdf">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="cart-checkout-submit" style="width:100%;margin-top:16px;">PAY NOW</button>
+                    </form>
+
+                    <div class="order-summary">
+                        <h3 style="margin-bottom: 14px;">Cart Summary</h3>
+                        <div id="cart-summary-lines" style="display:grid;gap:10px;"></div>
+                        <div class="summary-row"><span>Subtotal</span><span id="cart-summary-subtotal">—</span></div>
+                        <div class="summary-row"><span>Shipping</span><span id="cart-summary-shipping">—</span></div>
+                        <div class="summary-row total"><span>Total</span><span id="cart-summary-total">—</span></div>
+                        <div style="margin-top:14px;">
+                            <a href="index.html" data-nav-products class="btn btn-outline" style="width:100%;display:inline-flex;justify-content:center;">Back to products</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="js/cart.js"></script>
+    <script src="https://js.paystack.co/v1/inline.js"></script>
+    <script src="js/cart_checkout.js"></script>
+</body>
+</html>
+

@@ -36,6 +36,10 @@ export default {
             return handleManualOrder(request, env);
         }
 
+        if (path === '/api/refund-request' && request.method === 'POST') {
+            return handleRefundRequest(request, env);
+        }
+
         // Track site visit
         if (path === '/api/track-visit' && request.method === 'POST') {
             return handleTrackVisit(request, env);
@@ -69,6 +73,16 @@ export default {
                 status: 404,
                 headers: corsHeaders
             });
+        }
+
+        if (request.method === 'GET' && (path === '/' || path === '/index.html')) {
+            const mode = await getSiteMode(env);
+            if (mode === 'multipleproducts') {
+                return Response.redirect('/multiple.html', 302);
+            }
+            if (mode === 'affiliate') {
+                return Response.redirect('/affiliate.html', 302);
+            }
         }
 
         if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
@@ -146,9 +160,71 @@ async function handleVerifyPayment(request, env) {
         }
 
         const data = await request.json();
-        const { reference, package_id, expected_amount, currency, customer } = data;
-        const expectedAmount = Number(expected_amount || 0);
-        const expectedCurrency = String(currency || '').toUpperCase();
+        const {
+            reference,
+            package_id,
+            expected_amount,
+            currency,
+            customer,
+            product_id,
+            product_title,
+            package_title,
+            quantity,
+            shipping_fee
+        } = data;
+
+        let expectedAmount = Number(expected_amount || 0);
+        let expectedCurrency = String(currency || '').toUpperCase();
+        let resolvedProductId = String(product_id || '').trim();
+        let resolvedProductTitle = String(product_title || '').trim();
+        let resolvedPackageTitle = String(package_title || '').trim();
+        let resolvedQuantity = Number(quantity || 0) || 1;
+        let resolvedShippingFee = Number(shipping_fee || 0) || 0;
+        let resolvedItems = null;
+        let resolvedSubtotal = null;
+        let resolvedPackageId = String(package_id || '').trim();
+
+        const mode = await getSiteMode(env);
+        if (mode === 'multipleproducts' && Array.isArray(data.items) && data.items.length) {
+            const site = await getSiteConfig(env);
+            const resolvedCart = resolveMultipleCart(site, data.items);
+            if (!resolvedCart.ok) {
+                return jsonResponse({ success: false, error: resolvedCart.error || 'Invalid cart selection', retryable: false }, 400);
+            }
+
+            expectedAmount = resolvedCart.totals.total;
+            resolvedSubtotal = resolvedCart.totals.base;
+            resolvedShippingFee = resolvedCart.totals.shipping;
+            resolvedQuantity = resolvedCart.totals.itemCount;
+            resolvedItems = resolvedCart.items;
+            resolvedPackageId = 'cart';
+            resolvedPackageTitle = resolvedPackageTitle || 'Cart';
+            resolvedProductId = '';
+            resolvedProductTitle = '';
+
+            if (site && site.BUSINESS && site.BUSINESS.currencyCode) {
+                expectedCurrency = String(site.BUSINESS.currencyCode || expectedCurrency).toUpperCase();
+            }
+        } else if (mode === 'multipleproducts' && resolvedProductId) {
+            const site = await getSiteConfig(env);
+            const resolved = resolveMultipleProduct(site, resolvedProductId, String(package_id || '').trim());
+            if (!resolved.ok) {
+                return jsonResponse({ success: false, error: resolved.error || 'Invalid product selection', retryable: false }, 400);
+            }
+
+            const totals = computeMultipleProductTotals(resolved.product, resolved.pkg, resolvedQuantity);
+            expectedAmount = totals.total;
+            resolvedSubtotal = totals.base;
+            resolvedShippingFee = totals.shipping;
+            resolvedPackageId = String(package_id || '').trim();
+
+            if (site && site.BUSINESS && site.BUSINESS.currencyCode) {
+                expectedCurrency = String(site.BUSINESS.currencyCode || expectedCurrency).toUpperCase();
+            }
+
+            resolvedProductTitle = resolvedProductTitle || String(resolved.product.title || resolved.product.id || resolvedProductId);
+            resolvedPackageTitle = resolvedPackageTitle || String(resolved.pkg.title || resolved.pkg.id || package_id);
+        }
 
         const verifyResult = await verifyPaystackTransaction(reference, secret);
         if (!verifyResult.status) {
@@ -259,10 +335,17 @@ async function handleVerifyPayment(request, env) {
 
         const result = await confirmPaystackPayment(env, {
             transaction: transaction,
-            packageId: package_id,
+            packageId: resolvedPackageId,
+            packageTitle: resolvedPackageTitle,
             expectedAmount: expectedAmount,
+            subtotal: resolvedSubtotal,
             currency: expectedCurrency,
             customer: customer,
+            productId: resolvedProductId,
+            productTitle: resolvedProductTitle,
+            quantity: resolvedQuantity,
+            shippingFee: resolvedShippingFee,
+            items: resolvedItems,
             source: 'frontend_verify'
         });
 
@@ -280,6 +363,75 @@ async function handleVerifyPayment(request, env) {
     }
 }
 
+function resolveMultipleProduct(site, productId, packageId) {
+    const products = site && Array.isArray(site.PRODUCTS) ? site.PRODUCTS : [];
+    const product = products.find(function(p) { return p && p.id === productId; }) || null;
+    if (!product) {
+        return { ok: false, error: 'Product not found' };
+    }
+    const packages = Array.isArray(product.packages) ? product.packages : [];
+    const pkg = packages.find(function(p) { return p && p.id === packageId; }) || null;
+    if (!pkg) {
+        return { ok: false, error: 'Package not found' };
+    }
+    return { ok: true, product: product, pkg: pkg };
+}
+
+function computeMultipleProductTotals(product, pkg, qty) {
+    const quantity = Number(qty || 0) || 1;
+    const unitPrice = Number(pkg && pkg.price ? pkg.price : 0);
+    const shippingPerUnit = Number(product && product.shippingFee ? product.shippingFee : 0);
+    const base = unitPrice * quantity;
+    const shipping = shippingPerUnit * quantity;
+    return { base: base, shipping: shipping, total: base + shipping };
+}
+
+function resolveMultipleCart(site, items) {
+    const input = Array.isArray(items) ? items : [];
+    const resolvedItems = [];
+    let base = 0;
+    let shipping = 0;
+    let itemCount = 0;
+
+    for (let i = 0; i < input.length; i += 1) {
+        const row = input[i] || {};
+        const productId = String(row.productId || row.product_id || '').trim();
+        const packageId = String(row.packageId || row.package_id || '').trim();
+        const qty = Number(row.qty || row.quantity || 0) || 1;
+        if (!productId || !packageId) {
+            return { ok: false, error: 'Invalid cart item' };
+        }
+        if (qty <= 0) {
+            return { ok: false, error: 'Invalid quantity' };
+        }
+
+        const resolved = resolveMultipleProduct(site, productId, packageId);
+        if (!resolved.ok) {
+            return { ok: false, error: resolved.error || 'Invalid cart selection' };
+        }
+
+        const totals = computeMultipleProductTotals(resolved.product, resolved.pkg, qty);
+        base += totals.base;
+        shipping += totals.shipping;
+        itemCount += qty;
+
+        resolvedItems.push({
+            productId: productId,
+            productTitle: String(resolved.product.title || resolved.product.id || productId),
+            packageId: packageId,
+            packageTitle: String(resolved.pkg.title || resolved.pkg.id || packageId),
+            qty: qty,
+            unitPrice: Number(resolved.pkg.price || 0),
+            shippingPerUnit: Number(resolved.product.shippingFee || 0),
+            lineSubtotal: totals.base,
+            lineShipping: totals.shipping,
+            lineTotal: totals.total
+        });
+    }
+
+    return { ok: true, items: resolvedItems, totals: { base: base, shipping: shipping, total: base + shipping, itemCount: itemCount } };
+}
+
 // =========================================================
 // MANUAL ORDER HANDLER
 // =========================================================
@@ -293,6 +445,7 @@ async function handleManualOrder(request, env) {
 
         data = {
             package_id: form.get('package_id') || '',
+            product_id: form.get('product_id') || '',
             customer: {
                 name: form.get('customer_name') || '',
                 email: form.get('customer_email') || '',
@@ -306,11 +459,19 @@ async function handleManualOrder(request, env) {
             package_title: form.get('package_title') || '',
             quantity: Number(form.get('quantity') || 0),
             amount: Number(form.get('amount') || 0),
+            shipping_fee: Number(form.get('shipping_fee') || 0),
             currency: form.get('currency') || '',
             payment_method: form.get('payment_method') || 'manual',
             order_ref: form.get('order_ref') || '',
             product_type: form.get('product_type') || 'physical'
         };
+
+        const itemsRaw = form.get('items');
+        if (itemsRaw) {
+            try {
+                data.items = JSON.parse(String(itemsRaw));
+            } catch (error) {}
+        }
 
         if (receiptFile && typeof receiptFile.arrayBuffer === 'function' && receiptFile.size > 0) {
             const buffer = await receiptFile.arrayBuffer();
@@ -327,6 +488,45 @@ async function handleManualOrder(request, env) {
 
     if (!data.order_ref) {
         data.order_ref = 'MANUAL-' + Date.now();
+    }
+
+    if (!data.quantity || Number(data.quantity) <= 0) {
+        data.quantity = 1;
+    }
+
+    const mode = await getSiteMode(env);
+    if (mode === 'multipleproducts' && Array.isArray(data.items) && data.items.length) {
+        const site = await getSiteConfig(env);
+        const resolvedCart = resolveMultipleCart(site, data.items);
+        if (resolvedCart.ok) {
+            data.subtotal = resolvedCart.totals.base;
+            data.shipping_fee = resolvedCart.totals.shipping;
+            data.amount = resolvedCart.totals.total;
+            data.quantity = resolvedCart.totals.itemCount;
+            data.items = resolvedCart.items;
+            data.package_id = 'cart';
+            data.package_title = 'Cart';
+            if (!data.product) data.product = 'Cart order';
+            if (!data.product_type) data.product_type = 'mixed';
+            if (!data.currency && site && site.BUSINESS && site.BUSINESS.currencyCode) {
+                data.currency = String(site.BUSINESS.currencyCode || '').toUpperCase();
+            }
+        }
+    } else if (mode === 'multipleproducts' && data.product_id && data.package_id) {
+        const site = await getSiteConfig(env);
+        const resolved = resolveMultipleProduct(site, String(data.product_id || '').trim(), String(data.package_id || '').trim());
+        if (resolved.ok) {
+            const totals = computeMultipleProductTotals(resolved.product, resolved.pkg, Number(data.quantity || 1));
+            data.subtotal = totals.base;
+            data.shipping_fee = totals.shipping;
+            data.amount = totals.total;
+            if (site && site.BUSINESS && site.BUSINESS.currencyCode) {
+                data.currency = String(site.BUSINESS.currencyCode || data.currency || '').toUpperCase();
+            }
+            if (!data.product) data.product = String(resolved.product.title || resolved.product.id || '');
+            if (!data.package_title) data.package_title = String(resolved.pkg.title || resolved.pkg.id || '');
+            if (!data.product_type) data.product_type = String(resolved.product.productType || 'physical');
+        }
     }
 
     const warnings = [];
@@ -367,6 +567,86 @@ async function handleManualOrder(request, env) {
         receiptUploaded: Boolean(data.receipt),
         warnings: warnings
     });
+}
+
+async function handleRefundRequest(request, env) {
+    const ownerEmail = String(env.OWNER_EMAIL || '').trim();
+    if (!ownerEmail) {
+        return jsonResponse({ success: false, error: 'Owner email not configured' }, 503);
+    }
+
+    const payload = await request.json().catch(function() { return null; });
+    if (!payload) {
+        return jsonResponse({ success: false, error: 'Invalid request body' }, 400);
+    }
+
+    const name = String(payload.name || '').trim();
+    const email = String(payload.email || '').trim();
+    const phone = String(payload.phone || '').trim();
+    const reference = String(payload.reference || '').trim();
+    const message = String(payload.message || '').trim();
+
+    if (!name || !email || !phone || !reference || !message) {
+        return jsonResponse({ success: false, error: 'Missing required fields' }, 400);
+    }
+
+    const context = await getEmailContext(env);
+    const fromEmail = getFromEmail(env);
+    const preheader = 'Refund request from ' + name + ' (' + reference + ')';
+    const rows = [
+        { label: 'Name', value: name },
+        { label: 'Email', value: email },
+        { label: 'Phone', value: phone },
+        { label: 'Order Reference', value: reference }
+    ];
+
+    const detailsTable = buildEmailKeyValueRows(rows, context);
+    const messageHtml = '<div style="margin-top:14px;font-weight:700;">Message</div>' +
+        '<div style="margin-top:8px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.7;white-space:pre-line;">' + escapeHtmlText(message) + '</div>';
+
+    const ownerHtml = buildEmailShell(context, {
+        title: 'Refund Request',
+        preheader: preheader,
+        contentHtml:
+            '<div style="font-weight:900;font-size:18px;">Refund request submitted</div>' +
+            '<div style="margin-top:10px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">A customer submitted a refund request. Please review and respond.</div>' +
+            detailsTable +
+            messageHtml
+    });
+
+    const customerHtml = buildEmailShell(context, {
+        title: 'Refund Request Received',
+        preheader: 'We received your refund request (' + reference + ')',
+        contentHtml:
+            '<div style="font-weight:900;font-size:18px;">We received your refund request</div>' +
+            '<div style="margin-top:10px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">Thank you, ' + escapeHtmlText(name) + '. Our team will review your request and contact you shortly.</div>' +
+            buildEmailKeyValueRows([{ label: 'Order Reference', value: reference }], context)
+    });
+
+    const jobs = [];
+    jobs.push(sendEmail(env, {
+        from: fromEmail,
+        to: ownerEmail,
+        subject: sanitizeHeaderValue(String(context.brand.shortName || 'Store') + ' — Refund Request (' + reference + ')'),
+        text: 'Refund request\n\nName: ' + name + '\nEmail: ' + email + '\nPhone: ' + phone + '\nReference: ' + reference + '\n\nMessage:\n' + message,
+        html: ownerHtml
+    }));
+    jobs.push(sendEmail(env, {
+        from: fromEmail,
+        to: email,
+        subject: sanitizeHeaderValue(String(context.brand.shortName || 'Store') + ' — Refund Request Received (' + reference + ')'),
+        text: 'Hello ' + name + ',\n\nWe received your refund request.\nOrder reference: ' + reference + '\n\nWe will contact you shortly.',
+        html: customerHtml
+    }));
+
+    try {
+        await Promise.all(jobs);
+    } catch (error) {
+        console.error('Refund request email failed:', error && error.message ? error.message : error);
+        return jsonResponse({ success: false, error: 'Failed to submit request. Please try again.' }, 500);
+    }
+
+    return jsonResponse({ success: true });
 }
 
 async function handleTrackVisit(request, env) {
@@ -678,7 +958,7 @@ function handleHealthCheck(env) {
 // =========================================================
 // SEND ORDER EMAILS
 // =========================================================
-async function sendOrderEmails(transaction, env, method, customerInfo) {
+async function sendOrderEmails(transaction, env, method, customerInfo, orderRecord) {
     const ownerEmail = env.OWNER_EMAIL;
     const customer = customerInfo || (transaction.metadata ? transaction.metadata.custom_fields : []);
     const customerEmail = transaction.customer ? transaction.customer.email : '';
@@ -687,13 +967,13 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
 
     // Build owner email
     const ownerSubject = 'NEW ORDER - ' + transaction.reference;
-    const ownerBody = buildOwnerEmail(transaction, method, customer);
-    const ownerHtml = buildOwnerEmailHtml(transaction, method, customer, emailContext);
+    const ownerBody = buildOwnerEmail(transaction, method, customer, orderRecord);
+    const ownerHtml = buildOwnerEmailHtml(transaction, method, customer, emailContext, orderRecord);
 
     // Build customer email
     const customerSubject = 'Order Confirmation - ' + transaction.reference;
-    const customerBody = buildCustomerEmail(transaction, method, customer);
-    const customerHtml = buildCustomerEmailHtml(transaction, method, customer, emailContext);
+    const customerBody = buildCustomerEmail(transaction, method, customer, orderRecord);
+    const customerHtml = buildCustomerEmailHtml(transaction, method, customer, emailContext, orderRecord);
 
     const jobs = [];
     if (ownerEmail) {
@@ -856,9 +1136,10 @@ async function confirmPaystackPayment(env, options) {
     const transaction = options.transaction;
     const reference = String(transaction && transaction.reference ? transaction.reference : '').trim();
     const packageId = options.packageId || extractCustomFieldValue(transaction, 'package') || '';
-    const quantity = Number(extractCustomFieldValue(transaction, 'quantity') || 0);
+    const quantity = Number(options.quantity || extractCustomFieldValue(transaction, 'quantity') || 0) || 1;
     const customer = normalizeCustomerInfo(options.customer || extractCustomerFromPaystackTransaction(transaction));
     const amount = Number(options.expectedAmount || 0) || Number(transaction.amount || 0) / 100;
+    const subtotal = Number(options.subtotal || 0) || 0;
     const currency = String(options.currency || transaction.currency || '').toUpperCase();
     const existing = await getPaymentRecord(env, reference);
     const warnings = [];
@@ -873,11 +1154,16 @@ async function confirmPaystackPayment(env, options) {
         paymentStatus: 'verified',
         orderStatus: 'received',
         packageId: packageId,
-        packageTitle: packageId,
+        packageTitle: String(options.packageTitle || packageId),
         quantity: quantity,
+        subtotal: subtotal,
         amount: amount,
         currency: currency,
         customer: customer,
+        productId: String(options.productId || ''),
+        productTitle: String(options.productTitle || ''),
+        shippingFee: Number(options.shippingFee || 0) || 0,
+        items: Array.isArray(options.items) ? options.items : undefined,
         transactionStatus: transaction.status || 'success',
         source: options.source || 'frontend_verify',
         verifiedAt: new Date().toISOString()
@@ -890,7 +1176,7 @@ async function confirmPaystackPayment(env, options) {
     });
 
     try {
-        await sendOrderEmails(transaction, env, 'paystack', customer);
+        await sendOrderEmails(transaction, env, 'paystack', customer, record);
     } catch (error) {
         warnings.push('paystack_email_failed');
         console.error('Paystack order email failed:', error && error.message ? error.message : error);
@@ -938,11 +1224,15 @@ async function recordManualOrder(env, data) {
         packageId: data.package_id || '',
         packageTitle: data.package_title || '',
         quantity: Number(data.quantity || 0),
+        subtotal: Number(data.subtotal || 0) || 0,
         amount: Number(data.amount || 0),
         currency: data.currency || '',
         customer: normalizeCustomerInfo(data.customer),
         product: data.product || '',
+        productId: data.product_id || '',
         productType: data.product_type || 'physical',
+        shippingFee: Number(data.shipping_fee || 0) || 0,
+        items: Array.isArray(data.items) ? data.items : undefined,
         receiptUploaded: Boolean(data.receipt),
         createdAt: new Date().toISOString()
     };
@@ -1121,7 +1411,52 @@ function escapeHtmlText(value) {
         .replace(/>/g, '&gt;');
 }
 
-let siteConfigCache = { loadedAt: 0, value: null, promise: null };
+let siteModeCache = { loadedAt: 0, value: 'singleproduct', promise: null };
+let siteConfigCache = { loadedAt: 0, key: '', value: null, promise: null };
+
+async function getSiteMode(env) {
+    const ttlMs = 5 * 60 * 1000;
+    const now = Date.now();
+    if (siteModeCache.value && now - siteModeCache.loadedAt < ttlMs) {
+        return siteModeCache.value;
+    }
+
+    if (siteModeCache.promise) {
+        return siteModeCache.promise;
+    }
+
+    siteModeCache.promise = (async function() {
+        if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {
+            siteModeCache.value = 'singleproduct';
+            siteModeCache.loadedAt = Date.now();
+            return siteModeCache.value;
+        }
+
+        const response = await env.ASSETS.fetch(new Request('http://internal/js/site_selector.js'));
+        if (!response || !response.ok) {
+            siteModeCache.value = 'singleproduct';
+            siteModeCache.loadedAt = Date.now();
+            return siteModeCache.value;
+        }
+
+        const text = await response.text();
+        const cleaned = stripJsComments(text);
+        const regex = /const\s+WEBSITE_TYPE_SELECT\s*=\s*["']([^"']+)["']\s*;?/ig;
+        const matches = Array.from(String(cleaned || '').matchAll(regex));
+        const value = String(matches.length ? matches[matches.length - 1][1] : '').trim().toLowerCase();
+        const mode = (value === 'multipleproducts' || value === 'affiliate' || value === 'singleproduct' || value === 'sigleproduct')
+            ? (value === 'sigleproduct' ? 'singleproduct' : value)
+            : 'singleproduct';
+
+        siteModeCache.value = mode;
+        siteModeCache.loadedAt = Date.now();
+        return siteModeCache.value;
+    })().finally(function() {
+        siteModeCache.promise = null;
+    });
+
+    return siteModeCache.promise;
+}
 
 async function getEmailContext(env) {
     const site = await getSiteConfig(env);
@@ -1168,7 +1503,13 @@ async function getEmailContext(env) {
 async function getSiteConfig(env) {
     const ttlMs = 5 * 60 * 1000;
     const now = Date.now();
-    if (siteConfigCache.value && now - siteConfigCache.loadedAt < ttlMs) {
+    const mode = await getSiteMode(env);
+    const configPath = mode === 'multipleproducts'
+        ? '/js/config2.js'
+        : (mode === 'affiliate' ? '/js/config3.js' : '/js/config.js');
+    const cacheKey = mode + ':' + configPath;
+
+    if (siteConfigCache.value && siteConfigCache.key === cacheKey && now - siteConfigCache.loadedAt < ttlMs) {
         return siteConfigCache.value;
     }
 
@@ -1179,13 +1520,15 @@ async function getSiteConfig(env) {
     siteConfigCache.promise = (async function() {
         if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {
             siteConfigCache.value = null;
+            siteConfigCache.key = cacheKey;
             siteConfigCache.loadedAt = Date.now();
             return siteConfigCache.value;
         }
 
-        const response = await env.ASSETS.fetch(new Request('http://internal/js/config.js'));
+        const response = await env.ASSETS.fetch(new Request('http://internal' + configPath));
         if (!response || !response.ok) {
             siteConfigCache.value = null;
+            siteConfigCache.key = cacheKey;
             siteConfigCache.loadedAt = Date.now();
             return siteConfigCache.value;
         }
@@ -1195,10 +1538,15 @@ async function getSiteConfig(env) {
             BUSINESS: parseJsConst(text, 'BUSINESS'),
             BRAND: parseJsConst(text, 'BRAND'),
             PRODUCT: parseJsConst(text, 'PRODUCT'),
-            PACKAGES: parseJsConst(text, 'PACKAGES')
+            PACKAGES: parseJsConst(text, 'PACKAGES'),
+            PRODUCTS: parseJsConst(text, 'PRODUCTS'),
+            AFFILIATE_PRODUCTS: parseJsConst(text, 'AFFILIATE_PRODUCTS'),
+            PAYMENT: parseJsConst(text, 'PAYMENT'),
+            MANUAL_PAYMENT: parseJsConst(text, 'MANUAL_PAYMENT')
         };
 
         siteConfigCache.value = site;
+        siteConfigCache.key = cacheKey;
         siteConfigCache.loadedAt = Date.now();
         return siteConfigCache.value;
     })().finally(function() {
@@ -1364,6 +1712,40 @@ function buildEmailKeyValueRows(rows, context) {
     return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ' + border + ';border-radius:14px;border-collapse:separate;border-spacing:0;overflow:hidden;margin-top:14px;">' + html + '</table>';
 }
 
+function buildEmailLineItemsTable(items, context, currency) {
+    const brand = context.brand;
+    const border = escapeHtmlText(brand.border);
+    const muted = escapeHtmlText(brand.muted);
+    const suffix = currency ? (' ' + String(currency)) : '';
+    const rows = (Array.isArray(items) ? items : []).map(function(item) {
+        const title = String(item.productTitle || item.product || item.productId || '');
+        const variant = String(item.packageTitle || item.package || item.packageId || '');
+        const qty = String(item.qty || item.quantity || 0);
+        const total = item.lineTotal !== undefined ? (String(item.lineTotal) + suffix) : '';
+        return [
+            '<tr>',
+            '<td style="padding:10px 12px;border-bottom:1px solid ' + border + ';font-size:13px;font-weight:700;">' + escapeHtmlText(title) + '<div style="margin-top:4px;color:' + muted + ';font-weight:500;font-size:12px;">' + escapeHtmlText(variant) + '</div></td>',
+            '<td style="padding:10px 12px;border-bottom:1px solid ' + border + ';font-size:13px;text-align:right;">' + escapeHtmlText(qty) + '</td>',
+            '<td style="padding:10px 12px;border-bottom:1px solid ' + border + ';font-size:13px;text-align:right;font-weight:700;">' + escapeHtmlText(total) + '</td>',
+            '</tr>'
+        ].join('');
+    }).join('');
+
+    if (!rows) return '';
+
+    return [
+        '<div style="margin-top:16px;font-weight:800;">Items</div>',
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ' + border + ';border-radius:14px;border-collapse:separate;border-spacing:0;overflow:hidden;margin-top:10px;">',
+        '<tr>',
+        '<th align="left" style="padding:10px 12px;border-bottom:1px solid ' + border + ';color:' + muted + ';font-size:12px;font-weight:700;">Item</th>',
+        '<th align="right" style="padding:10px 12px;border-bottom:1px solid ' + border + ';color:' + muted + ';font-size:12px;font-weight:700;">Qty</th>',
+        '<th align="right" style="padding:10px 12px;border-bottom:1px solid ' + border + ';color:' + muted + ';font-size:12px;font-weight:700;">Total</th>',
+        '</tr>',
+        rows,
+        '</table>'
+    ].join('');
+}
+
 function getPackageById(packages, id) {
     const list = Array.isArray(packages) ? packages : [];
     const key = String(id || '').trim();
@@ -1382,22 +1764,41 @@ function buildAddressLine(customer) {
     return parts.filter(Boolean).join(', ');
 }
 
-function buildOwnerEmailHtml(transaction, method, customer, context) {
+function buildOwnerEmailHtml(transaction, method, customer, context, record) {
     const amount = String((transaction.amount || 0) / 100);
     const currency = String(transaction.currency || '');
     const packageId = extractCustomFieldValue(transaction, 'package') || '';
     const pkg = getPackageById(context.site.packages, packageId);
     const productName = context.site.product && context.site.product.name ? String(context.site.product.name) : '';
 
+    const hasRecord = Boolean(record && record.reference);
+    const displayCurrency = hasRecord ? String(record.currency || currency || '') : currency;
+    const displayAmount = hasRecord ? String(record.amount || '') : amount;
+    const displayShipping = hasRecord ? Number(record.shippingFee || 0) : 0;
+    const displaySubtotal = hasRecord ? Number(record.subtotal || 0) : 0;
+    const isCart = hasRecord && Array.isArray(record.items) && record.items.length;
+
     const rows = [
-        { label: 'Reference', value: transaction.reference || '' },
-        { label: 'Amount', value: amount + ' ' + currency },
-        { label: 'Product', value: productName || '' },
-        { label: 'Package', value: pkg ? String(pkg.title || pkg.id || '') : packageId },
-        { label: 'Quantity', value: String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : '')) },
-        { label: 'Payment Method', value: String(method || '') },
-        { label: 'Status', value: String(transaction.status || '') }
+        { label: 'Reference', value: hasRecord ? String(record.reference || '') : (transaction.reference || '') },
+        { label: 'Amount', value: displayAmount + ' ' + displayCurrency }
     ];
+
+    if (isCart) {
+        if (displaySubtotal) rows.push({ label: 'Subtotal', value: String(displaySubtotal) + ' ' + displayCurrency });
+        if (displayShipping) rows.push({ label: 'Shipping', value: String(displayShipping) + ' ' + displayCurrency });
+        rows.push({ label: 'Items', value: String(record.quantity || 0) });
+    } else {
+        const resolvedProductName = hasRecord && record.productTitle ? String(record.productTitle) : (productName || '');
+        const resolvedPackageTitle = hasRecord && record.packageTitle ? String(record.packageTitle) : (pkg ? String(pkg.title || pkg.id || '') : packageId);
+        const resolvedQuantity = hasRecord ? String(record.quantity || '') : String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : ''));
+        if (resolvedProductName) rows.push({ label: 'Product', value: resolvedProductName });
+        if (resolvedPackageTitle) rows.push({ label: 'Package', value: resolvedPackageTitle });
+        if (resolvedQuantity) rows.push({ label: 'Quantity', value: resolvedQuantity });
+        if (displayShipping) rows.push({ label: 'Shipping', value: String(displayShipping) + ' ' + displayCurrency });
+    }
+
+    rows.push({ label: 'Payment Method', value: String(method || '') });
+    rows.push({ label: 'Status', value: String(transaction.status || '') });
 
     const customerLines = [];
     if (customer && !Array.isArray(customer)) {
@@ -1423,24 +1824,43 @@ function buildOwnerEmailHtml(transaction, method, customer, context) {
     return buildEmailShell(context, {
         title: 'New order - ' + String(transaction.reference || ''),
         preheader: 'New order received: ' + String(transaction.reference || ''),
-        contentHtml: headline + buildEmailKeyValueRows(rows, context) + customerHtml
+        contentHtml: headline + buildEmailKeyValueRows(rows, context) + (isCart ? buildEmailLineItemsTable(record.items, context, displayCurrency) : '') + customerHtml
     });
 }
 
-function buildCustomerEmailHtml(transaction, method, customer, context) {
+function buildCustomerEmailHtml(transaction, method, customer, context, record) {
     const amount = String((transaction.amount || 0) / 100);
     const currency = String(transaction.currency || '');
     const packageId = extractCustomFieldValue(transaction, 'package') || '';
     const pkg = getPackageById(context.site.packages, packageId);
     const productName = context.site.product && context.site.product.name ? String(context.site.product.name) : '';
+    const hasRecord = Boolean(record && record.reference);
+    const displayCurrency = hasRecord ? String(record.currency || currency || '') : currency;
+    const displayAmount = hasRecord ? String(record.amount || '') : amount;
+    const displayShipping = hasRecord ? Number(record.shippingFee || 0) : 0;
+    const displaySubtotal = hasRecord ? Number(record.subtotal || 0) : 0;
+    const isCart = hasRecord && Array.isArray(record.items) && record.items.length;
+
     const rows = [
-        { label: 'Order reference', value: transaction.reference || '' },
-        { label: 'Product', value: productName || '' },
-        { label: 'Package', value: pkg ? String(pkg.title || pkg.id || '') : packageId },
-        { label: 'Quantity', value: String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : '')) },
-        { label: 'Amount paid', value: amount + ' ' + currency },
-        { label: 'Payment method', value: String(method || '') }
+        { label: 'Order reference', value: hasRecord ? String(record.reference || '') : (transaction.reference || '') },
+        { label: 'Amount paid', value: displayAmount + ' ' + displayCurrency }
     ];
+
+    if (isCart) {
+        if (displaySubtotal) rows.push({ label: 'Subtotal', value: String(displaySubtotal) + ' ' + displayCurrency });
+        if (displayShipping) rows.push({ label: 'Shipping', value: String(displayShipping) + ' ' + displayCurrency });
+        rows.push({ label: 'Items', value: String(record.quantity || 0) });
+    } else {
+        const resolvedProductName = hasRecord && record.productTitle ? String(record.productTitle) : (productName || '');
+        const resolvedPackageTitle = hasRecord && record.packageTitle ? String(record.packageTitle) : (pkg ? String(pkg.title || pkg.id || '') : packageId);
+        const resolvedQuantity = hasRecord ? String(record.quantity || '') : String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : ''));
+        if (resolvedProductName) rows.push({ label: 'Product', value: resolvedProductName });
+        if (resolvedPackageTitle) rows.push({ label: 'Package', value: resolvedPackageTitle });
+        if (resolvedQuantity) rows.push({ label: 'Quantity', value: resolvedQuantity });
+        if (displayShipping) rows.push({ label: 'Shipping', value: String(displayShipping) + ' ' + displayCurrency });
+    }
+
+    rows.push({ label: 'Payment method', value: String(method || '') });
 
     const greeting = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">Payment received</div>' +
         '<div style="color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">Thank you for your purchase. Your order is confirmed and will be processed shortly.</div>';
@@ -1450,20 +1870,32 @@ function buildCustomerEmailHtml(transaction, method, customer, context) {
     return buildEmailShell(context, {
         title: 'Order confirmation - ' + String(transaction.reference || ''),
         preheader: 'Your order is confirmed: ' + String(transaction.reference || ''),
-        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + note
+        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + (isCart ? buildEmailLineItemsTable(record.items, context, displayCurrency) : '') + note
     });
 }
 
 function buildManualOrderEmailHtml(data, context) {
     const productName = data.product || (context.site.product && context.site.product.name ? String(context.site.product.name) : '');
+    const isCart = Array.isArray(data.items) && data.items.length;
+    const currency = String(data.currency || '');
     const rows = [
-        { label: 'Order reference', value: data.order_ref || '' },
-        { label: 'Product', value: productName || '' },
-        { label: 'Package', value: data.package_title || '' },
-        { label: 'Quantity', value: String(data.quantity || 0) },
-        { label: 'Amount', value: String(data.amount || 0) + ' ' + String(data.currency || '') },
-        { label: 'Receipt attached', value: data.receipt ? 'Yes' : 'No' }
+        { label: 'Order reference', value: data.order_ref || '' }
     ];
+
+    if (isCart) {
+        if (data.subtotal !== undefined) rows.push({ label: 'Subtotal', value: String(data.subtotal || 0) + ' ' + currency });
+        if (data.shipping_fee !== undefined) rows.push({ label: 'Shipping', value: String(data.shipping_fee || 0) + ' ' + currency });
+        rows.push({ label: 'Items', value: String(data.quantity || 0) });
+        rows.push({ label: 'Amount', value: String(data.amount || 0) + ' ' + currency });
+    } else {
+        rows.push({ label: 'Product', value: productName || '' });
+        rows.push({ label: 'Package', value: data.package_title || '' });
+        rows.push({ label: 'Quantity', value: String(data.quantity || 0) });
+        if (data.shipping_fee) rows.push({ label: 'Shipping', value: String(data.shipping_fee || 0) + ' ' + currency });
+        rows.push({ label: 'Amount', value: String(data.amount || 0) + ' ' + currency });
+    }
+
+    rows.push({ label: 'Receipt attached', value: data.receipt ? 'Yes' : 'No' });
 
     const headline = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">Manual order received</div>' +
         '<div style="color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">A customer submitted a manual bank transfer order. Please verify payment and process the order.</div>';
@@ -1483,7 +1915,7 @@ function buildManualOrderEmailHtml(data, context) {
     return buildEmailShell(context, {
         title: 'Manual order - ' + String(data.order_ref || ''),
         preheader: 'Manual order received: ' + String(data.order_ref || ''),
-        contentHtml: headline + buildEmailKeyValueRows(rows, context) + customerHtml
+        contentHtml: headline + buildEmailKeyValueRows(rows, context) + (isCart ? buildEmailLineItemsTable(data.items, context, currency) : '') + customerHtml
     });
 }
 
@@ -1494,26 +1926,35 @@ function buildManualCustomerEmailHtml(data, context) {
         '<div style="color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.6;">Thank you, ' + escapeHtmlText(name) + '. Your order has been received and is awaiting payment confirmation.</div>';
 
     const productName = data.product || (context.site.product && context.site.product.name ? String(context.site.product.name) : '');
+    const isCart = Array.isArray(data.items) && data.items.length;
+    const currency = String(data.currency || '');
     const rows = [
         { label: 'Order reference', value: data.order_ref || '' },
-        { label: 'Product', value: productName || '' },
-        { label: 'Package', value: data.package_title || '' },
-        { label: 'Amount', value: String(data.amount || 0) + ' ' + String(data.currency || '') }
+        { label: 'Amount', value: String(data.amount || 0) + ' ' + currency }
     ];
+
+    if (isCart) {
+        if (data.subtotal !== undefined) rows.push({ label: 'Subtotal', value: String(data.subtotal || 0) + ' ' + currency });
+        if (data.shipping_fee !== undefined) rows.push({ label: 'Shipping', value: String(data.shipping_fee || 0) + ' ' + currency });
+        rows.push({ label: 'Items', value: String(data.quantity || 0) });
+    } else {
+        rows.splice(1, 0, { label: 'Product', value: productName || '' });
+        rows.splice(2, 0, { label: 'Package', value: data.package_title || '' });
+    }
 
     const note = '<div style="margin-top:16px;color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.7;">Please complete your bank transfer and send your proof of payment. Once confirmed, we will process your order.</div>';
 
     return buildEmailShell(context, {
         title: 'Order received - ' + String(data.order_ref || ''),
         preheader: 'Order received: ' + String(data.order_ref || ''),
-        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + note
+        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + (isCart ? buildEmailLineItemsTable(data.items, context, currency) : '') + note
     });
 }
 
 // =========================================================
 // EMAIL BUILDERS
 // =========================================================
-function buildOwnerEmail(transaction, method, customer) {
+function buildOwnerEmail(transaction, method, customer, record) {
     let customerDetails = '';
     let packageLine = '';
     let quantityLine = '';
@@ -1536,11 +1977,31 @@ function buildOwnerEmail(transaction, method, customer) {
         quantityLine = String(customer.quantity || '');
     }
 
+    const lines = [];
+    if (record && Array.isArray(record.items) && record.items.length) {
+        lines.push('ITEMS:');
+        record.items.forEach(function(item) {
+            if (!item) return;
+            lines.push('- ' + String(item.productTitle || item.productId || '') + ' (' + String(item.packageTitle || item.packageId || '') + ') x' + String(item.qty || 0) + ' = ' + String(item.lineTotal || '') + ' ' + String(record.currency || ''));
+        });
+        if (record.subtotal !== undefined) lines.push('Subtotal: ' + String(record.subtotal) + ' ' + String(record.currency || ''));
+        if (record.shippingFee !== undefined) lines.push('Shipping: ' + String(record.shippingFee) + ' ' + String(record.currency || ''));
+    } else if (record && (record.productTitle || record.packageTitle)) {
+        if (record.productTitle) lines.push('Product: ' + String(record.productTitle));
+        if (record.packageTitle) lines.push('Package: ' + String(record.packageTitle));
+        if (record.quantity !== undefined) lines.push('Quantity: ' + String(record.quantity));
+        if (record.shippingFee) lines.push('Shipping: ' + String(record.shippingFee) + ' ' + String(record.currency || transaction.currency || ''));
+    }
+
+    const recordAmount = record && record.amount !== undefined ? String(record.amount) : String((transaction.amount || 0) / 100);
+    const recordCurrency = record && record.currency ? String(record.currency) : String(transaction.currency || '');
+
     return 'NEW ORDER RECEIVED\\n\\n' +
         'Reference: ' + transaction.reference + '\\n' +
-        (packageLine ? ('Package: ' + packageLine + '\\n') : '') +
-        (quantityLine ? ('Quantity: ' + quantityLine + '\\n') : '') +
-        'Amount: ' + (transaction.amount / 100) + ' ' + transaction.currency + '\\n' +
+        (lines.length ? (lines.join('\\n') + '\\n') : '') +
+        (!lines.length && packageLine ? ('Package: ' + packageLine + '\\n') : '') +
+        (!lines.length && quantityLine ? ('Quantity: ' + quantityLine + '\\n') : '') +
+        'Amount: ' + recordAmount + ' ' + recordCurrency + '\\n' +
         'Payment Method: ' + method + '\\n' +
         'Status: ' + transaction.status + '\\n\\n' +
         'CUSTOMER DETAILS:\\n' +
@@ -1548,26 +2009,46 @@ function buildOwnerEmail(transaction, method, customer) {
         'Please process this order promptly.';
 }
 
-function buildCustomerEmail(transaction, method, customer) {
-    const packageLine = String(extractCustomFieldValue(transaction, 'package') || '');
-    const quantityLine = String(extractCustomFieldValue(transaction, 'quantity') || '');
+function buildCustomerEmail(transaction, method, customer, record) {
+    const packageLine = record && record.packageTitle ? String(record.packageTitle) : String(extractCustomFieldValue(transaction, 'package') || '');
+    const quantityLine = record && record.quantity !== undefined ? String(record.quantity) : String(extractCustomFieldValue(transaction, 'quantity') || '');
+    const recordAmount = record && record.amount !== undefined ? String(record.amount) : String((transaction.amount || 0) / 100);
+    const recordCurrency = record && record.currency ? String(record.currency) : String(transaction.currency || '');
+
+    let itemsText = '';
+    if (record && Array.isArray(record.items) && record.items.length) {
+        itemsText = 'Items:\\n' + record.items.map(function(item) {
+            return '- ' + String(item.productTitle || item.productId || '') + ' (' + String(item.packageTitle || item.packageId || '') + ') x' + String(item.qty || 0) + ' = ' + String(item.lineTotal || '') + ' ' + recordCurrency;
+        }).join('\\n') + '\\n\\n';
+    }
+
     return 'Thank you for your order!\\n\\n' +
         'Order Reference: ' + transaction.reference + '\\n' +
+        itemsText +
         (packageLine ? ('Package: ' + packageLine + '\\n') : '') +
         (quantityLine ? ('Quantity: ' + quantityLine + '\\n') : '') +
-        'Amount: ' + (transaction.amount / 100) + ' ' + transaction.currency + '\\n' +
+        'Amount: ' + recordAmount + ' ' + recordCurrency + '\\n' +
         'Payment Method: ' + method + '\\n\\n' +
         'We have received your payment and will process your order shortly.\\n' +
         'Thank you for shopping with us!';
 }
 
 function buildManualOrderEmail(data) {
+    const currency = String(data.currency || '');
+    let itemsBlock = '';
+    if (Array.isArray(data.items) && data.items.length) {
+        itemsBlock = 'ITEMS:\\n' + data.items.map(function(item) {
+            return '- ' + String(item.productTitle || item.productId || '') + ' (' + String(item.packageTitle || item.packageId || '') + ') x' + String(item.qty || 0) + ' = ' + String(item.lineTotal || '') + ' ' + currency;
+        }).join('\\n') + '\\n\\n' +
+        'Subtotal: ' + String(data.subtotal || 0) + ' ' + currency + '\\n' +
+        'Shipping: ' + String(data.shipping_fee || 0) + ' ' + currency + '\\n';
+    }
+
     return 'NEW MANUAL PAYMENT ORDER\\n\\n' +
         'Order Reference: ' + data.order_ref + '\\n' +
         'Product: ' + data.product + '\\n' +
         'Product Type: ' + (data.product_type || 'physical') + '\\n' +
-        'Package: ' + data.package_title + '\\n' +
-        'Quantity: ' + data.quantity + '\\n' +
+        (itemsBlock ? itemsBlock : ('Package: ' + data.package_title + '\\n' + 'Quantity: ' + data.quantity + '\\n')) +
         'Amount: ' + data.amount + ' ' + data.currency + '\\n\\n' +
         'CUSTOMER DETAILS:\\n' +
         'Name: ' + (data.customer.name || '') + '\\n' +
@@ -1583,11 +2064,20 @@ function buildManualOrderEmail(data) {
 }
 
 function buildManualCustomerEmail(data) {
+    const currency = String(data.currency || '');
+    let itemsBlock = '';
+    if (Array.isArray(data.items) && data.items.length) {
+        itemsBlock = 'Items:\\n' + data.items.map(function(item) {
+            return '- ' + String(item.productTitle || item.productId || '') + ' (' + String(item.packageTitle || item.packageId || '') + ') x' + String(item.qty || 0) + ' = ' + String(item.lineTotal || '') + ' ' + currency;
+        }).join('\\n') + '\\n\\n' +
+        'Subtotal: ' + String(data.subtotal || 0) + ' ' + currency + '\\n' +
+        'Shipping: ' + String(data.shipping_fee || 0) + ' ' + currency + '\\n';
+    }
+
     return 'Hello ' + (data.customer.name || 'Valued Customer') + ',\\n\\n' +
         'Thank you for your order!\\n\\n' +
         'Order Reference: ' + data.order_ref + '\\n' +
-        'Product: ' + data.product + '\\n' +
-        'Package: ' + data.package_title + '\\n' +
+        (itemsBlock ? itemsBlock : ('Product: ' + data.product + '\\n' + 'Package: ' + data.package_title + '\\n')) +
         'Amount: ' + data.amount + ' ' + data.currency + '\\n\\n' +
         'Please complete your bank transfer and send proof of payment via WhatsApp or email.\\n' +
         'Your order will be processed once payment is confirmed.\\n\\n' +

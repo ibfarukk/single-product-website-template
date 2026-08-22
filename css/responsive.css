@@ -166,6 +166,12 @@
         margin: 32px auto 0;
     }
 
+    .packages-grid.store-grid {
+        grid-template-columns: repeat(2, 1fr);
+        max-width: none;
+        margin: 32px 0 0;
+    }
+
     .package-card.popular {
         order: -1;
         transform: scale(1);
@@ -178,6 +184,17 @@
 
     .checkout-grid {
         grid-template-columns: 1fr;
+    }
+
+    #details-slider img,
+    #affiliate-details-slider img {
+        height: 260px !important;
+    }
+
+    #details-thumbs img,
+    #affiliate-details-thumbs img {
+        width: 56px !important;
+        height: 56px !important;
     }
 
     .checkout-form {
@@ -346,6 +363,11 @@
         height: 52px;
     }
 
+    .packages-grid.store-grid {
+        grid-template-columns: 1fr;
+        margin: 24px 0 0;
+    }
+
     .sticky-cta .btn {
         padding: 8px 14px;
         font-size: 0.8rem;
@@ -359,6 +381,13 @@
     .final-cta .btn {
         width: 100%;
         max-width: 280px;
+    }
+
+    .floating-cart {
+        right: 12px;
+        bottom: 12px;
+        padding: 10px 14px;
+        font-size: 14px;
     }
 }
 

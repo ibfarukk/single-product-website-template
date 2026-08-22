@@ -170,7 +170,7 @@
                 </div>
                 <div class="success-detail-row">
                     <span>Product</span>
-                    <span>PMELAB Power Bank</span>
+                    <span id="order-product">—</span>
                 </div>
                 <div class="success-detail-row">
                     <span>Package</span>
@@ -184,6 +184,7 @@
                     <span>Total Amount</span>
                     <span id="order-total">₦25,000</span>
                 </div>
+                <div id="order-items" style="display:none;margin-top:14px;border-top:1px solid rgba(0,0,0,0.06);padding-top:14px;"></div>
             </div>
 
             <div class="success-note" id="manual-note" style="display:none">
@@ -288,12 +289,62 @@
                     }
 
                     const packageKey = String(record.packageId || pkgId || 'single');
-                    const pkg = PACKAGES.find(function(p) { return p.id === packageKey; }) || PACKAGES[0];
+                    const hasPackages = typeof PACKAGES !== 'undefined' && Array.isArray(PACKAGES) && PACKAGES.length;
+                    const pkg = hasPackages ? (PACKAGES.find(function(p) { return p.id === packageKey; }) || PACKAGES[0]) : null;
+                    const packageTitle = String(record.packageTitle || (pkg && pkg.title ? pkg.title : packageKey) || packageKey);
+
+                    const productTitle = String(record.productTitle || record.product || (typeof PRODUCT !== 'undefined' && PRODUCT.name ? PRODUCT.name : '') || '');
 
                     document.getElementById('order-ref').textContent = ref;
-                    document.getElementById('order-package').textContent = pkg && pkg.title ? pkg.title : packageKey;
+                    document.getElementById('order-product').textContent = productTitle || '—';
+                    document.getElementById('order-package').textContent = packageTitle || packageKey;
                     document.getElementById('order-quantity').textContent = String(record.quantity || (pkg && pkg.quantity ? pkg.quantity : 1));
                     document.getElementById('order-total').textContent = formatTotal(record.amount || (pkg && pkg.price ? pkg.price : 0), record.currency || (BUSINESS ? BUSINESS.currencyCode : ''));
+
+                    const itemsBox = document.getElementById('order-items');
+                    const items = record && Array.isArray(record.items) ? record.items : [];
+                    if (itemsBox) {
+                        if (!items.length) {
+                            itemsBox.style.display = 'none';
+                            itemsBox.innerHTML = '';
+                        } else {
+                            itemsBox.style.display = 'block';
+                            const titleEl = document.createElement('div');
+                            titleEl.style.fontWeight = '800';
+                            titleEl.style.marginBottom = '10px';
+                            titleEl.textContent = 'Items';
+
+                            const list = document.createElement('div');
+                            list.style.display = 'grid';
+                            list.style.gap = '10px';
+
+                            items.forEach(function(item) {
+                                const row = document.createElement('div');
+                                row.style.border = '1px solid rgba(0,0,0,0.08)';
+                                row.style.borderRadius = '12px';
+                                row.style.padding = '12px';
+                                row.style.background = '#fff';
+
+                                const lineTitle = document.createElement('div');
+                                lineTitle.style.fontWeight = '700';
+                                lineTitle.textContent = String(item.productTitle || item.productId || '');
+
+                                const lineMeta = document.createElement('div');
+                                lineMeta.style.color = 'rgba(0,0,0,0.65)';
+                                lineMeta.style.fontSize = '0.9rem';
+                                lineMeta.style.marginTop = '6px';
+                                lineMeta.textContent = String(item.packageTitle || item.packageId || '') + ' · Qty ' + String(item.qty || item.quantity || 0) + ' · ' + String(item.lineTotal || '') + ' ' + String(record.currency || '');
+
+                                row.appendChild(lineTitle);
+                                row.appendChild(lineMeta);
+                                list.appendChild(row);
+                            });
+
+                            itemsBox.innerHTML = '';
+                            itemsBox.appendChild(titleEl);
+                            itemsBox.appendChild(list);
+                        }
+                    }
 
                     const successTitle = document.getElementById('success-title');
                     const successMessage = document.getElementById('success-message');

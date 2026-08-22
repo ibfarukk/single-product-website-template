@@ -62,10 +62,16 @@
     }
 
     function showError(message) {
-        const el = $('checkout-error');
+        const el = $('cart-checkout-error');
         if (!el) return;
         el.textContent = message || '';
         el.classList.toggle('owner-hidden', !message);
+    }
+
+    function formatMoney(amount) {
+        const currency = (typeof BUSINESS !== 'undefined' && BUSINESS && BUSINESS.currency) ? BUSINESS.currency : '₦';
+        const value = Number(amount || 0);
+        return currency + value.toLocaleString('en-NG');
     }
 
     function getApiUrl(path) {
@@ -75,12 +81,6 @@
         return base.replace(/\/+$/, '') + cleanPath;
     }
 
-    function formatMoney(amount) {
-        const currency = (typeof BUSINESS !== 'undefined' && BUSINESS && BUSINESS.currency) ? BUSINESS.currency : '₦';
-        const value = Number(amount || 0);
-        return currency + value.toLocaleString('en-NG');
-    }
-
     function generateOrderRef() {
         const prefix = String((BUSINESS && BUSINESS.shortName) ? BUSINESS.shortName : 'ORDER').substring(0, 6).toUpperCase().replace(/\s+/g, '');
         const timestamp = Date.now().toString(36).toUpperCase();
@@ -88,25 +88,20 @@
         return prefix + '-' + timestamp + random;
     }
 
-    function getQueryParam(name) {
-        const url = new URL(window.location.href);
-        return url.searchParams.get(name);
-    }
-
     function normalizeProducts() {
         if (typeof PRODUCTS !== 'undefined' && Array.isArray(PRODUCTS)) return PRODUCTS;
         return [];
     }
 
-    function findProduct(id) {
-        const pid = String(id || '').trim();
-        return normalizeProducts().find(function(p) { return p.id === pid; }) || null;
+    function findProduct(productId) {
+        const id = String(productId || '').trim();
+        return normalizeProducts().find(function(p) { return p.id === id; }) || null;
     }
 
     function findPackage(product, packageId) {
         if (!product || !Array.isArray(product.packages)) return null;
-        const pkgId = String(packageId || '').trim();
-        return product.packages.find(function(p) { return p.id === pkgId; }) || null;
+        const pid = String(packageId || '').trim();
+        return product.packages.find(function(p) { return p.id === pid; }) || null;
     }
 
     function computeTotals(product, pkg, qty) {
@@ -117,17 +112,41 @@
         return { base: base, shipping: shipping, total: base + shipping };
     }
 
+    function computeCartTotals(cart) {
+        const rows = Array.isArray(cart) ? cart : [];
+        let base = 0;
+        let shipping = 0;
+        let totalQty = 0;
+        let hasPhysical = false;
+        const lineItems = [];
+
+        rows.forEach(function(row) {
+            const product = findProduct(row.productId);
+            const pkg = findPackage(product, row.packageId);
+            if (!product || !pkg) return;
+            const qty = Number(row.qty || 0) || 1;
+            const totals = computeTotals(product, pkg, qty);
+            base += totals.base;
+            shipping += totals.shipping;
+            totalQty += qty;
+            if (String(product.productType || '').toLowerCase() !== 'digital') hasPhysical = true;
+            lineItems.push({ product: product, pkg: pkg, qty: qty, totals: totals });
+        });
+
+        return { base: base, shipping: shipping, total: base + shipping, totalQty: totalQty, hasPhysical: hasPhysical, lines: lineItems };
+    }
+
     function toggleManual(show) {
-        const manualBox = $('checkout-manual-details');
+        const manualBox = $('cart-manual-details');
         if (manualBox) manualBox.classList.toggle('owner-hidden', !show);
     }
 
     function renderManualDetails() {
         if (typeof MANUAL_PAYMENT === 'undefined') return;
-        const bank = $('checkout-manual-bank');
-        const name = $('checkout-manual-account-name');
-        const number = $('checkout-manual-account-number');
-        const deadline = $('checkout-manual-deadline');
+        const bank = $('cart-manual-bank');
+        const name = $('cart-manual-account-name');
+        const number = $('cart-manual-account-number');
+        const deadline = $('cart-manual-deadline');
 
         if (bank) bank.textContent = MANUAL_PAYMENT.bankName || '';
         if (name) name.textContent = MANUAL_PAYMENT.accountName || '';
@@ -140,41 +159,32 @@
         return selectedRadio ? String(selectedRadio.value || '').trim() : 'paystack';
     }
 
-    function setSubmitting(submitting) {
-        const btn = $('checkout-submit');
-        if (!btn) return;
-        btn.disabled = submitting;
-        btn.textContent = submitting ? 'PROCESSING...' : 'PAY NOW';
-    }
-
     function getCustomerInfo() {
         return {
-            name: String(($('checkout-name').value || '')).trim(),
-            email: String(($('checkout-email').value || '')).trim(),
-            phone: String(($('checkout-phone').value || '')).trim(),
-            address: String(($('checkout-address').value || '')).trim(),
-            state: String(($('checkout-state').value || '')).trim(),
-            city: String(($('checkout-city').value || '')).trim(),
-            specialRequest: String(($('checkout-special').value || '')).trim()
+            name: String(($('cart-name').value || '')).trim(),
+            email: String(($('cart-email').value || '')).trim(),
+            phone: String(($('cart-phone').value || '')).trim(),
+            address: String(($('cart-address').value || '')).trim(),
+            state: String(($('cart-state').value || '')).trim(),
+            city: String(($('cart-city').value || '')).trim(),
+            specialRequest: String(($('cart-special').value || '')).trim()
         };
     }
 
     function setAddressRequired(isRequired) {
-        const addressGroup = $('checkout-address-group');
-        const locationRow = $('checkout-location-row');
-        const addressInput = $('checkout-address');
+        const addressGroup = $('cart-address-group');
+        const locationRow = $('cart-location-row');
+        const addressInput = $('cart-address');
         if (addressGroup) addressGroup.style.display = isRequired ? '' : 'none';
         if (locationRow) locationRow.style.display = isRequired ? '' : 'none';
         if (addressInput) addressInput.required = isRequired;
     }
 
-    function updateSummary(product, pkg, qty, totals) {
-        $('summary-product').textContent = product ? String(product.title || product.id) : '—';
-        $('summary-package').textContent = pkg ? String(pkg.title || pkg.id) : '—';
-        $('summary-qty').textContent = String(qty || 1);
-        $('summary-subtotal').textContent = formatMoney(totals.base || 0);
-        $('summary-shipping').textContent = formatMoney(totals.shipping || 0);
-        $('summary-total').textContent = formatMoney(totals.total || 0);
+    function setSubmitting(submitting) {
+        const btn = $('cart-checkout-submit');
+        if (!btn) return;
+        btn.disabled = submitting;
+        btn.textContent = submitting ? 'PROCESSING...' : 'PAY NOW';
     }
 
     async function verifyPayment(payload) {
@@ -192,21 +202,23 @@
 
     async function submitManualOrder(payload, receiptFile) {
         const formData = new FormData();
-        Object.keys(payload).forEach(function(key) {
-            if (payload[key] === undefined || payload[key] === null) return;
-            if (key === 'customer') {
-                const customer = payload.customer || {};
-                formData.append('customer_name', String(customer.name || ''));
-                formData.append('customer_email', String(customer.email || ''));
-                formData.append('customer_phone', String(customer.phone || ''));
-                formData.append('customer_address', String(customer.address || ''));
-                formData.append('customer_state', String(customer.state || ''));
-                formData.append('customer_city', String(customer.city || ''));
-                formData.append('customer_special_request', String(customer.specialRequest || ''));
-                return;
-            }
-            formData.append(key, String(payload[key]));
-        });
+        formData.append('order_ref', String(payload.order_ref || ''));
+        formData.append('payment_method', 'manual');
+        formData.append('currency', String(payload.currency || ''));
+        formData.append('items', JSON.stringify(payload.items || []));
+        formData.append('product', 'Cart order');
+        formData.append('package_id', 'cart');
+        formData.append('package_title', 'Cart');
+
+        const customer = payload.customer || {};
+        formData.append('customer_name', String(customer.name || ''));
+        formData.append('customer_email', String(customer.email || ''));
+        formData.append('customer_phone', String(customer.phone || ''));
+        formData.append('customer_address', String(customer.address || ''));
+        formData.append('customer_state', String(customer.state || ''));
+        formData.append('customer_city', String(customer.city || ''));
+        formData.append('customer_special_request', String(customer.specialRequest || ''));
+
         if (receiptFile) {
             formData.append('payment_receipt', receiptFile, receiptFile.name);
         }
@@ -222,57 +234,46 @@
         return data;
     }
 
-    function initCheckout(product) {
-        const pkgSelect = $('checkout-package');
-        const qtyInput = $('checkout-qty');
-        const form = $('checkout-form');
-        if (!pkgSelect || !qtyInput || !form) return;
-
-        const packageFromUrl = getQueryParam('package');
-        const qtyFromUrl = Number(getQueryParam('qty') || 1) || 1;
-
-        const packages = Array.isArray(product.packages) ? product.packages : [];
-        pkgSelect.innerHTML = packages.map(function(p) {
-            return '<option value="' + String(p.id) + '">' + String(p.title || p.id) + ' — ' + formatMoney(p.price || 0) + '</option>';
-        }).join('');
-
-        if (packageFromUrl && packages.some(function(p) { return p.id === packageFromUrl; })) {
-            pkgSelect.value = packageFromUrl;
+    function renderSummary(cartTotals) {
+        const linesEl = $('cart-summary-lines');
+        if (linesEl) {
+            linesEl.innerHTML = cartTotals.lines.map(function(line) {
+                return '<div style="border:1px solid var(--border);border-radius:14px;padding:12px;background:#fff;">' +
+                    '<div style="font-weight:900;margin-bottom:6px;">' + String(line.product.title || line.product.id) + '</div>' +
+                    '<div style="color:var(--muted);font-size:13px;line-height:1.6;">' +
+                    'Package: ' + String(line.pkg.title || line.pkg.id) + '<br>' +
+                    'Qty: ' + String(line.qty) + '<br>' +
+                    'Line total: ' + formatMoney(line.totals.total) +
+                    '</div>' +
+                    '</div>';
+            }).join('');
         }
 
-        qtyInput.value = String(qtyFromUrl > 0 ? Math.floor(qtyFromUrl) : 1);
+        $('cart-summary-subtotal').textContent = formatMoney(cartTotals.base);
+        $('cart-summary-shipping').textContent = formatMoney(cartTotals.shipping);
+        $('cart-summary-total').textContent = formatMoney(cartTotals.total);
+    }
 
-        function refreshSummary() {
-            const pkg = findPackage(product, String(pkgSelect.value || ''));
-            const qty = Number(qtyInput.value || 1) || 1;
-            const totals = computeTotals(product, pkg, qty);
-            updateSummary(product, pkg, qty, totals);
-            const isPhysical = String(product.productType || '').toLowerCase() !== 'digital';
-            setAddressRequired(isPhysical);
-            return { pkg: pkg, qty: qty, totals: totals };
-        }
+    function initCheckout(cart, cartTotals) {
+        const form = $('cart-checkout-form');
+        if (!form) return;
+
+        setAddressRequired(cartTotals.hasPhysical);
+        toggleManual(false);
+        renderManualDetails();
 
         form.addEventListener('change', function(e) {
             if (e.target && e.target.name === 'payment_method') {
                 toggleManual(getSelectedPaymentMethod(form) === 'manual');
             }
-            refreshSummary();
         });
-
-        qtyInput.addEventListener('change', refreshSummary);
-        pkgSelect.addEventListener('change', refreshSummary);
-
-        refreshSummary();
-        toggleManual(false);
-        renderManualDetails();
 
         form.addEventListener('submit', function(e) {
             e.preventDefault();
             showError('');
 
-            const selection = refreshSummary();
-            if (!selection.pkg) {
-                showError('Select a package.');
+            if (!cart.length) {
+                showError('Your cart is empty.');
                 return;
             }
 
@@ -281,34 +282,26 @@
                 showError('Please fill your name, email, and phone.');
                 return;
             }
-
-            const isPhysical = String(product.productType || '').toLowerCase() !== 'digital';
-            if (isPhysical && !customer.address) {
+            if (cartTotals.hasPhysical && !customer.address) {
                 showError('Please enter your delivery address.');
                 return;
             }
 
             const method = getSelectedPaymentMethod(form);
             const orderRef = generateOrderRef();
+            const currency = (typeof PAYMENT !== 'undefined' && PAYMENT && PAYMENT.currency) ? PAYMENT.currency : (BUSINESS.currencyCode || 'NGN');
 
             const payload = {
                 order_ref: orderRef,
                 customer: customer,
-                payment_method: method,
-                currency: (typeof PAYMENT !== 'undefined' && PAYMENT && PAYMENT.currency) ? PAYMENT.currency : (BUSINESS.currencyCode || 'NGN'),
-                product_id: String(product.id || ''),
-                package_id: String(selection.pkg.id || ''),
-                product: String(product.title || product.id || ''),
-                package_title: String(selection.pkg.title || selection.pkg.id || ''),
-                product_type: String(product.productType || 'physical'),
-                quantity: Number(selection.qty || 1),
-                subtotal: Number(selection.totals.base || 0),
-                shipping_fee: Number(selection.totals.shipping || 0),
-                amount: Number(selection.totals.total || 0)
+                currency: currency,
+                items: cart.map(function(row) {
+                    return { productId: row.productId, packageId: row.packageId, qty: row.qty };
+                })
             };
 
             if (method === 'manual') {
-                const receiptInput = $('checkout-receipt');
+                const receiptInput = $('cart-receipt');
                 const receipt = receiptInput && receiptInput.files && receiptInput.files[0] ? receiptInput.files[0] : null;
                 if (typeof PAYMENT !== 'undefined' && PAYMENT && PAYMENT.manualReceiptRequired && !receipt) {
                     showError('Please upload payment receipt.');
@@ -318,6 +311,9 @@
                 setSubmitting(true);
                 submitManualOrder(payload, receipt)
                     .then(function() {
+                        if (window.PMELAB_CART && typeof window.PMELAB_CART.clear === 'function') {
+                            window.PMELAB_CART.clear();
+                        }
                         window.location.href = 'success.html?ref=' + encodeURIComponent(orderRef);
                     })
                     .catch(function(error) {
@@ -344,7 +340,7 @@
             const handler = PaystackPop.setup({
                 key: PAYMENT.paystackPublicKey,
                 email: customer.email,
-                amount: Math.round(Number(selection.totals.total || 0) * 100),
+                amount: Math.round(Number(cartTotals.total || 0) * 100),
                 currency: PAYMENT.currency || 'NGN',
                 ref: orderRef,
                 metadata: {
@@ -356,6 +352,9 @@
                 callback: function(response) {
                     verifyPayment(Object.assign({}, payload, { reference: response.reference }))
                         .then(function() {
+                            if (window.PMELAB_CART && typeof window.PMELAB_CART.clear === 'function') {
+                                window.PMELAB_CART.clear();
+                            }
                             window.location.href = 'success.html?ref=' + encodeURIComponent(response.reference);
                         })
                         .catch(function(error) {
@@ -393,22 +392,25 @@
                 return;
             }
 
-            const id = getQueryParam('id');
-            if (!id) {
-                showError('Missing product id.');
+            if (!window.PMELAB_CART || typeof window.PMELAB_CART.load !== 'function') {
+                showError('Cart is not available.');
                 return;
             }
 
-            const product = findProduct(id);
-            if (!product) {
-                showError('Product not found.');
+            const cart = window.PMELAB_CART.load();
+            if (!cart.length) {
+                showError('Your cart is empty.');
                 return;
             }
 
-            const checkoutTitle = $('checkout-title');
-            if (checkoutTitle) checkoutTitle.textContent = String(product.title || product.id || 'Checkout');
+            const cartTotals = computeCartTotals(cart);
+            if (!cartTotals.lines.length) {
+                showError('Some cart items are invalid. Please clear cart and add items again.');
+                return;
+            }
 
-            initCheckout(product);
+            renderSummary(cartTotals);
+            initCheckout(cart, cartTotals);
 
             if (window.PMELAB_CART && typeof window.PMELAB_CART.init === 'function') {
                 window.PMELAB_CART.init();
@@ -418,3 +420,4 @@
         });
     });
 })();
+

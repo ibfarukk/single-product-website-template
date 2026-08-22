@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Store</title>
+    <link rel="icon" type="image/jpeg" href="productsimages/logo.jpg">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <script src="js/site_selector.js"></script>
+    <script>
+        (function() {
+            try {
+                const value = typeof WEBSITE_TYPE_SELECT !== 'undefined' ? String(WEBSITE_TYPE_SELECT).trim().toLowerCase() : 'singleproduct';
+                if (value !== 'multipleproducts') {
+                    window.location.replace('index.html');
+                }
+            } catch (error) {}
+        })();
+    </script>
+</head>
+<body>
+    <header class="header">
+        <div class="container header-inner">
+            <a href="#home" class="logo">
+                <img src="productsimages/logo.jpg" alt="Logo" loading="eager">
+            </a>
+
+            <nav class="nav-desktop">
+                <a href="#products" class="nav-link">Products</a>
+                <a href="about.html" class="nav-link">About</a>
+                <a href="contact.html" class="nav-link">Contact</a>
+                <a href="refund-policy.html" class="nav-link">Refund Policy</a>
+                <a href="refund-form.html" class="nav-link">Refund Form</a>
+            </nav>
+
+            <button class="mobile-menu-btn" aria-label="Toggle menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+    </header>
+
+    <nav class="mobile-nav">
+        <a href="#products">Products</a>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="refund-policy.html">Refund Policy</a>
+        <a href="refund-form.html">Refund Form</a>
+    </nav>
+
+    <main id="home">
+        <section class="hero" style="padding-bottom: 40px;">
+            <div class="container hero-inner" style="grid-template-columns: 1fr;">
+                <div class="hero-content" style="max-width: 820px;">
+                    <div class="hero-badge" id="multi-badge">STORE</div>
+                    <h1 class="hero-title" id="multi-title">Shop Products</h1>
+                    <p class="hero-desc" id="multi-desc">Choose a product, view details, add to cart, and checkout securely.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="products" style="padding-top: 0;">
+            <div class="container">
+                <div class="section-head">
+                    <h2 class="section-title">Products</h2>
+                    <p class="section-subtitle">View details to see full description, specifications, images, and checkout.</p>
+                </div>
+
+                <div id="multi-products-grid" class="packages-grid store-grid"></div>
+                <div id="multi-products-empty" class="owner-hidden" style="padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: #fff;">No products found.</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="js/config2.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/cart.js"></script>
+    <script src="js/multiple.js"></script>
+</body>
+</html>

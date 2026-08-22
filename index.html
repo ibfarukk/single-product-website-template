@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
+    <script src="js/site_selector.js"></script>
+    <script>
+        (function() {
+            try {
+                const value = typeof WEBSITE_TYPE_SELECT !== 'undefined' ? String(WEBSITE_TYPE_SELECT).trim().toLowerCase() : 'singleproduct';
+                if (value === 'multipleproducts') {
+                    window.location.replace('multiple.html');
+                    return;
+                }
+                if (value === 'affiliate') {
+                    window.location.replace('affiliate.html');
+                }
+            } catch (error) {}
+        })();
+    </script>
+
     <!-- SEO -->
     <title>PMELAB Power Bank | PMELAB TECHNOLOGY LIMITED</title>
     <meta name="description" content="Get reliable portable power from PMELAB TECHNOLOGY LIMITED. The PMELAB Power Bank keeps your devices charged wherever you go. Order now with fast delivery across Nigeria.">

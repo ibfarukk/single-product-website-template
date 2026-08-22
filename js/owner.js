@@ -147,6 +147,18 @@
             return '<div class="owner-lookup-row"><span>' + label + '</span><span>' + safeText(value) + '</span></div>';
         };
 
+        const items = record && Array.isArray(record.items) ? record.items : [];
+        const itemsHtml = items.length ? (
+            '<h3 style="margin-top:16px;">Items</h3>' +
+            items.map(function(item) {
+                const title = safeText(item.productTitle || item.productId || '');
+                const variant = safeText(item.packageTitle || item.packageId || '');
+                const qty = safeText(item.qty || item.quantity || '');
+                const total = item.lineTotal !== undefined ? (safeText(item.lineTotal) + ' ' + safeText(record.currency)) : '';
+                return '<div class="owner-lookup-row"><span>' + title + (variant ? (' (' + variant + ')') : '') + '</span><span>' + (qty ? ('x' + qty + ' ') : '') + total + '</span></div>';
+            }).join('')
+        ) : '';
+
         box.innerHTML = [
             '<h3>Order Details</h3>',
             '<div class="owner-lookup-row"><span>Reference</span><span>' + safeText(record.reference) + '</span></div>',
@@ -156,8 +168,11 @@
             '<div class="owner-lookup-row"><span>Package</span><span>' + safeText(record.packageTitle || record.packageId) + '</span></div>',
             '<div class="owner-lookup-row"><span>Quantity</span><span>' + safeText(record.quantity) + '</span></div>',
             '<div class="owner-lookup-row"><span>Amount</span><span>' + safeText(record.amount) + ' ' + safeText(record.currency) + '</span></div>',
+            rowHtml('Subtotal', record.subtotal !== undefined ? (safeText(record.subtotal) + ' ' + safeText(record.currency)) : ''),
+            rowHtml('Shipping', record.shippingFee !== undefined ? (safeText(record.shippingFee) + ' ' + safeText(record.currency)) : ''),
             rowHtml('Verified At', record.verifiedAt),
             rowHtml('Created At', record.createdAt),
+            itemsHtml,
             '<h3 style="margin-top:16px;">Customer</h3>',
             rowHtml('Name', customer.name),
             rowHtml('Email', customer.email),
