@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Order Confirmed | PMELAB TECHNOLOGY LIMITED</title>
     <meta name="description" content="Your order has been confirmed. Thank you for shopping with PMELAB TECHNOLOGY LIMITED.">
-    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="icon" type="image/jpeg" href="productsimages/logo.jpg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -222,64 +222,129 @@
     <script>
         (function() {
             const params = new URLSearchParams(window.location.search);
-            const ref = params.get('ref') || 'PMELAB-' + Math.random().toString(36).substring(2, 10).toUpperCase();
-            const pkgId = params.get('pkg') || 'single';
-            const isManual = params.get('manual');
+            const ref = String(params.get('ref') || '').trim();
+            const pkgId = String(params.get('pkg') || '').trim();
+            const manualParam = String(params.get('manual') || '').trim().toLowerCase();
+            const isManual = manualParam === '1' || manualParam === 'true' || manualParam === 'yes';
             const isDigital = String(typeof PRODUCT_TYPE !== 'undefined' ? PRODUCT_TYPE : 'physical').toLowerCase() === 'digital';
 
-            const pkg = PACKAGES.find(function(p) { return p.id === pkgId; }) || PACKAGES[0];
+            function getApiUrl(path) {
+                const cleanPath = path.startsWith('/') ? path : '/' + path;
+                const base = typeof API_BASE_URL !== 'undefined' ? String(API_BASE_URL).trim() : '';
+                if (!base) return cleanPath;
+                return base.replace(/\/+$/, '') + cleanPath;
+            }
 
-            document.getElementById('order-ref').textContent = ref;
-            document.getElementById('order-package').textContent = pkg.title;
-            document.getElementById('order-quantity').textContent = pkg.quantity;
-            document.getElementById('order-total').textContent = BUSINESS.currency + pkg.price.toLocaleString('en-NG');
+            function formatTotal(amount, currency) {
+                const value = Number(amount || 0);
+                const code = String(currency || '').toUpperCase();
+                if (code && typeof BUSINESS !== 'undefined' && BUSINESS.currencyCode && code !== String(BUSINESS.currencyCode).toUpperCase()) {
+                    return value.toLocaleString('en-NG') + ' ' + code;
+                }
+                return (BUSINESS && BUSINESS.currency ? BUSINESS.currency : '') + value.toLocaleString('en-NG');
+            }
 
-            const successTitle = document.getElementById('success-title');
-            const successMessage = document.getElementById('success-message');
-            const manualNoteTitle = document.getElementById('manual-note-title');
-            const manualNoteMessage = document.getElementById('manual-note-message');
-            const manualBankDetails = document.getElementById('manual-bank-details');
+            function showBlocked(message) {
+                const successTitle = document.getElementById('success-title');
+                const successMessage = document.getElementById('success-message');
+                const orderDetails = document.getElementById('order-details');
+                const manualNote = document.getElementById('manual-note');
+                const manualBankDetails = document.getElementById('manual-bank-details');
 
-            if (isDigital) {
-                if (successTitle) successTitle.textContent = 'ORDER RECEIVED';
-                if (successMessage) {
-                    successMessage.textContent = isManual
-                        ? 'Thank you for your order. Once your payment is verified, we will send your digital product details shortly.'
-                        : 'Thank you for your order. Your payment has been received and your digital product details will be sent shortly.';
-                }
-                if (manualNoteTitle) manualNoteTitle.textContent = 'Manual Payment for Digital Order';
-                if (manualNoteMessage) {
-                    manualNoteMessage.textContent = 'Please complete your bank transfer and upload or send proof of payment. Your digital product will be delivered once payment is verified.';
-                }
-            } else {
-                if (successTitle) successTitle.textContent = 'ORDER CONFIRMED';
-                if (successMessage) {
-                    successMessage.textContent = isManual
-                        ? 'Thank you for your order. Once your payment is verified, we will process and prepare your order.'
-                        : 'Thank you for your order. We have received your payment and will process your order shortly.';
-                }
-                if (manualNoteTitle) manualNoteTitle.textContent = 'Manual Payment Order';
-                if (manualNoteMessage) {
-                    manualNoteMessage.textContent = 'Please complete your bank transfer and upload or send proof of payment. Your order will be confirmed once payment is verified.';
+                if (successTitle) successTitle.textContent = 'ORDER NOT CONFIRMED';
+                if (successMessage) successMessage.textContent = message || 'This page can only be accessed after a confirmed payment.';
+                if (orderDetails) orderDetails.style.display = 'none';
+                if (manualNote) manualNote.style.display = 'none';
+                if (manualBankDetails) manualBankDetails.style.display = 'none';
+                if (typeof BUSINESS !== 'undefined' && BUSINESS.name) {
+                    document.title = 'Order Not Confirmed | ' + BUSINESS.name;
                 }
             }
 
-            if (isManual) {
-                document.getElementById('manual-note').style.display = 'block';
-                if (manualBankDetails && typeof MANUAL_PAYMENT !== 'undefined') {
-                    manualBankDetails.style.display = 'block';
-                    document.getElementById('manual-bank-name').textContent = MANUAL_PAYMENT.bankName || 'Bank details will be shared shortly';
-                    document.getElementById('manual-account-name').textContent = MANUAL_PAYMENT.accountName || 'Please contact support';
-                    document.getElementById('manual-account-number').textContent = MANUAL_PAYMENT.accountNumber || 'Please contact support';
-                    document.getElementById('manual-bank-instructions').textContent =
-                        MANUAL_PAYMENT.instructions || 'Please complete your transfer using the bank details above and keep your payment receipt for reference.';
-                    document.getElementById('manual-bank-deadline').textContent =
-                        MANUAL_PAYMENT.paymentDeadline || '';
-                }
+            if (!ref) {
+                showBlocked('This page can only be accessed after a confirmed payment. Please return to the store and complete checkout.');
+                return;
             }
 
-            // Update page title
-            document.title = 'Order Confirmed | ' + BUSINESS.name;
+            fetch(getApiUrl('/api/payment-status?ref=' + encodeURIComponent(ref)))
+                .then(function(res) {
+                    return res.json().catch(function() {
+                        return { success: false };
+                    });
+                })
+                .then(function(data) {
+                    const record = data && data.record ? data.record : null;
+                    if (!data || !data.success || !record) {
+                        showBlocked('We could not confirm this order reference. Please return to the store and try again.');
+                        return;
+                    }
+
+                    const isVerified = record.paymentStatus === 'verified';
+                    const allowManual = isManual && record.orderType === 'manual' && (record.paymentStatus === 'manual_submitted' || record.paymentStatus === 'verified');
+
+                    if (!isVerified && !allowManual) {
+                        window.location.replace('payment-failed.html?ref=' + encodeURIComponent(ref));
+                        return;
+                    }
+
+                    const packageKey = String(record.packageId || pkgId || 'single');
+                    const pkg = PACKAGES.find(function(p) { return p.id === packageKey; }) || PACKAGES[0];
+
+                    document.getElementById('order-ref').textContent = ref;
+                    document.getElementById('order-package').textContent = pkg && pkg.title ? pkg.title : packageKey;
+                    document.getElementById('order-quantity').textContent = String(record.quantity || (pkg && pkg.quantity ? pkg.quantity : 1));
+                    document.getElementById('order-total').textContent = formatTotal(record.amount || (pkg && pkg.price ? pkg.price : 0), record.currency || (BUSINESS ? BUSINESS.currencyCode : ''));
+
+                    const successTitle = document.getElementById('success-title');
+                    const successMessage = document.getElementById('success-message');
+                    const manualNoteTitle = document.getElementById('manual-note-title');
+                    const manualNoteMessage = document.getElementById('manual-note-message');
+                    const manualBankDetails = document.getElementById('manual-bank-details');
+
+                    const manualNote = document.getElementById('manual-note');
+                    if (manualNote) manualNote.style.display = allowManual && !isVerified ? 'block' : 'none';
+
+                    if (allowManual && !isVerified) {
+                        if (isDigital) {
+                            if (successTitle) successTitle.textContent = 'ORDER RECEIVED';
+                            if (successMessage) successMessage.textContent = 'Thank you for your order. Once your payment is verified, we will send your digital product details shortly.';
+                            if (manualNoteTitle) manualNoteTitle.textContent = 'Manual Payment for Digital Order';
+                            if (manualNoteMessage) manualNoteMessage.textContent = 'Please complete your bank transfer and upload or send proof of payment. Your digital product will be delivered once payment is verified.';
+                        } else {
+                            if (successTitle) successTitle.textContent = 'ORDER RECEIVED';
+                            if (successMessage) successMessage.textContent = 'Thank you for your order. Once your payment is verified, we will process and prepare your order.';
+                            if (manualNoteTitle) manualNoteTitle.textContent = 'Manual Payment Order';
+                            if (manualNoteMessage) manualNoteMessage.textContent = 'Please complete your bank transfer and upload or send proof of payment. Your order will be confirmed once payment is verified.';
+                        }
+
+                        if (manualBankDetails && typeof MANUAL_PAYMENT !== 'undefined') {
+                            manualBankDetails.style.display = 'block';
+                            document.getElementById('manual-bank-name').textContent = MANUAL_PAYMENT.bankName || 'Bank details will be shared shortly';
+                            document.getElementById('manual-account-name').textContent = MANUAL_PAYMENT.accountName || 'Please contact support';
+                            document.getElementById('manual-account-number').textContent = MANUAL_PAYMENT.accountNumber || 'Please contact support';
+                            document.getElementById('manual-bank-instructions').textContent =
+                                MANUAL_PAYMENT.instructions || 'Please complete your transfer using the bank details above and keep your payment receipt for reference.';
+                            document.getElementById('manual-bank-deadline').textContent =
+                                MANUAL_PAYMENT.paymentDeadline || '';
+                        }
+                    } else {
+                        if (manualBankDetails) manualBankDetails.style.display = 'none';
+                        if (isDigital) {
+                            if (successTitle) successTitle.textContent = 'ORDER CONFIRMED';
+                            if (successMessage) successMessage.textContent = 'Thank you for your order. Your payment has been received and your digital product details will be sent shortly.';
+                        } else {
+                            if (successTitle) successTitle.textContent = 'ORDER CONFIRMED';
+                            if (successMessage) successMessage.textContent = 'Thank you for your order. We have received your payment and will process your order shortly.';
+                        }
+                    }
+
+                    if (typeof BUSINESS !== 'undefined' && BUSINESS.name) {
+                        document.title = (allowManual && !isVerified) ? ('Order Received | ' + BUSINESS.name) : ('Order Confirmed | ' + BUSINESS.name);
+                    }
+                })
+                .catch(function() {
+                    showBlocked('We could not confirm this order reference. Please return to the store and try again.');
+                });
         })();
     </script>
 </body>

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Owner Dashboard</title>
-    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="icon" type="image/jpeg" href="productsimages/logo.jpg">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/responsive.css">
     <style>
@@ -84,6 +84,51 @@
             border-radius: 16px;
             padding: 16px;
             color: var(--muted);
+        }
+        .owner-lookup {
+            margin-top: 22px;
+        }
+        .owner-lookup-form {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+        .owner-lookup-form .form-group {
+            flex: 1 1 260px;
+            margin-bottom: 0;
+        }
+        .owner-lookup-result {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 18px;
+            background: #fff;
+            box-shadow: var(--shadow-sm);
+        }
+        .owner-lookup-result h3 {
+            font-size: 1rem;
+            margin-bottom: 12px;
+        }
+        .owner-lookup-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 0.95rem;
+        }
+        .owner-lookup-row:last-child {
+            border-bottom: none;
+        }
+        .owner-lookup-row span:first-child {
+            color: var(--muted);
+        }
+        .owner-lookup-row span:last-child {
+            color: var(--text);
+            font-weight: 700;
+            text-align: right;
+            overflow-wrap: anywhere;
         }
         .owner-error {
             margin-top: 12px;
@@ -173,6 +218,18 @@
                         Successful sales count verified Paystack orders. Manual orders are tracked separately because they may still be awaiting confirmation. Failed sales count backend verification failures. Abandoned checkout counts Paystack windows closed before completion.
                     </div>
                     <div id="owner-dashboard-error" class="owner-error owner-hidden"></div>
+                    <div class="owner-lookup">
+                        <h2 style="margin: 22px 0 12px 0;">Reference Lookup</h2>
+                        <form id="owner-lookup-form" class="owner-lookup-form">
+                            <div class="form-group">
+                                <label for="owner-lookup-ref">Payment Reference</label>
+                                <input type="text" id="owner-lookup-ref" autocomplete="off" placeholder="e.g. PMELAB-ABC123..." required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Search</button>
+                        </form>
+                        <div id="owner-lookup-error" class="owner-error owner-hidden" role="alert" aria-live="polite"></div>
+                        <div id="owner-lookup-result" class="owner-lookup-result owner-hidden" aria-live="polite"></div>
+                    </div>
                 </div>
             </div>
         </div>

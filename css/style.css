@@ -1650,6 +1650,14 @@ h1, h2, h3, h4, h5, h6 {
     max-width: 300px;
 }
 
+.footer-brand img {
+    height: 44px;
+    width: auto;
+    object-fit: contain;
+    display: block;
+    margin-bottom: 16px;
+}
+
 .footer-brand .logo-text {
     color: var(--white);
     -webkit-text-fill-color: var(--white);

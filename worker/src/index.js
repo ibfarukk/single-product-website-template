@@ -51,6 +51,10 @@ export default {
             return handleOwnerStats(request, env);
         }
 
+        if (path === '/api/owner/order' && request.method === 'GET') {
+            return handleOwnerOrderLookup(request, env);
+        }
+
         // Public payment / order status lookup
         if (path === '/api/payment-status' && request.method === 'GET') {
             return handlePaymentStatus(request, env);
@@ -453,6 +457,59 @@ async function handleOwnerStats(request, env) {
         success: true,
         stats: stats
     });
+}
+
+async function handleOwnerOrderLookup(request, env) {
+    if (!env.OWNER_STATS) {
+        return jsonResponse({ success: false, error: 'Stats storage not configured' }, 503);
+    }
+
+    const authorized = isOwnerAuthorized(request, env);
+    if (!authorized.ok) {
+        return new Response(JSON.stringify({
+            success: false,
+            error: authorized.error
+        }), {
+            status: 401,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+            }
+        });
+    }
+
+    const url = new URL(request.url);
+    const reference = String(url.searchParams.get('ref') || '').trim();
+    if (!reference) {
+        return jsonResponse({ success: false, error: 'Missing payment reference' }, 400);
+    }
+
+    let record = await getPaymentRecord(env, reference);
+
+    if (!record && env.PAYSTACK_SECRET_KEY) {
+        try {
+            const verifyResult = await verifyPaystackTransaction(reference, env.PAYSTACK_SECRET_KEY);
+            if (verifyResult && verifyResult.status && verifyResult.data && verifyResult.data.status === 'success') {
+                const transaction = verifyResult.data;
+                await confirmPaystackPayment(env, {
+                    transaction: transaction,
+                    packageId: extractCustomFieldValue(transaction, 'package'),
+                    expectedAmount: transaction.amount / 100,
+                    currency: transaction.currency,
+                    customer: extractCustomerFromPaystackTransaction(transaction),
+                    source: 'owner_lookup'
+                });
+                record = await getPaymentRecord(env, reference);
+            }
+        } catch (error) {}
+    }
+
+    if (!record) {
+        return jsonResponse({ success: false, found: false, error: 'Payment record not found' }, 404);
+    }
+
+    return jsonResponse({ success: true, found: true, record: record });
 }
 
 async function handlePaymentStatus(request, env) {
@@ -1073,17 +1130,28 @@ async function getEmailContext(env) {
     const product = site && site.PRODUCT ? site.PRODUCT : {};
     const packages = site && Array.isArray(site.PACKAGES) ? site.PACKAGES : [];
 
+    const website = String(business.website || env.BUSINESS_WEBSITE || '').trim();
+    let logoUrl = '';
+    if (website) {
+        try {
+            logoUrl = new URL('/productsimages/logo.jpg', website).toString();
+        } catch (error) {
+            logoUrl = '';
+        }
+    }
+
     const resolvedBrand = {
         businessName: String(business.name || env.BUSINESS_NAME || ''),
         shortName: String(business.shortName || env.BUSINESS_SHORT_NAME || ''),
-        website: String(business.website || env.BUSINESS_WEBSITE || ''),
+        website: website,
         primary: String(brand.primaryColor || env.BRAND_PRIMARY_COLOR || '#0f172a'),
         primaryDark: String(brand.primaryDark || env.BRAND_PRIMARY_DARK || '#0b1220'),
         surface: String(brand.backgroundColor || env.BRAND_SURFACE_COLOR || '#FFFFFF'),
         background: String(brand.lightBackground || env.BRAND_BACKGROUND_COLOR || '#F8FAFC'),
         text: String(brand.textColor || env.BRAND_TEXT_COLOR || '#111827'),
         muted: String(brand.mutedTextColor || env.BRAND_MUTED_TEXT_COLOR || '#6B7280'),
-        border: String(brand.borderColor || env.BRAND_BORDER_COLOR || '#E5E7EB')
+        border: String(brand.borderColor || env.BRAND_BORDER_COLOR || '#E5E7EB'),
+        logoUrl: logoUrl
     };
 
     return {
@@ -1236,6 +1304,10 @@ function buildEmailShell(context, options) {
     const footerLine = escapeHtmlText(options.footerLine || ('© ' + year + ' ' + (brand.businessName || brand.shortName || '') + '.'));
     const website = String(brand.website || '').trim();
     const websiteHtml = website ? ('<a href="' + escapeHtmlText(website) + '" style="color:' + escapeHtmlText(brand.primary) + ';text-decoration:none;">' + escapeHtmlText(website) + '</a>') : '';
+    const logoUrl = String(brand.logoUrl || '').trim();
+    const logoHtml = logoUrl
+        ? ('<img src="' + escapeHtmlText(logoUrl) + '" width="44" height="44" style="display:block;width:44px;height:44px;border-radius:12px;object-fit:cover;" alt="' + escapeHtmlText(brand.shortName || brand.businessName || 'Logo') + '" />')
+        : ('<div style="width:44px;height:44px;border-radius:12px;background:' + escapeHtmlText(brand.primary) + ';"></div>');
 
     return [
         '<!doctype html>',
@@ -1252,7 +1324,7 @@ function buildEmailShell(context, options) {
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px;max-width:600px;">',
         '<tr><td style="padding:0 16px 16px 16px;">',
         '<div style="display:flex;align-items:center;gap:12px;">',
-        '<div style="width:44px;height:44px;border-radius:12px;background:' + escapeHtmlText(brand.primary) + ';"></div>',
+        logoHtml,
         '<div>',
         '<div style="font-weight:800;font-size:18px;line-height:1.2;">' + escapeHtmlText(brand.shortName) + '</div>',
         '<div style="color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.4;">' + escapeHtmlText(brand.businessName) + '</div>',

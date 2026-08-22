@@ -118,6 +118,89 @@
         }
     }
 
+    function safeText(value) {
+        return String(value === undefined || value === null ? '' : value);
+    }
+
+    function showLookupError(message) {
+        showError('owner-lookup-error', message);
+    }
+
+    function clearLookupError() {
+        clearError('owner-lookup-error');
+    }
+
+    function hideLookupResult() {
+        const box = document.getElementById('owner-lookup-result');
+        if (!box) return;
+        box.classList.add('owner-hidden');
+        box.innerHTML = '';
+    }
+
+    function renderLookupResult(record) {
+        const box = document.getElementById('owner-lookup-result');
+        if (!box) return;
+
+        const customer = record && record.customer ? record.customer : {};
+        const lines = [];
+        const addRow = function(label, value) {
+            if (value === undefined || value === null || value === '') return;
+            lines.push('<div class="owner-lookup-row"><span>' + label + '</span><span>' + safeText(value) + '</span></div>');
+        };
+
+        box.innerHTML = [
+            '<h3>Order Details</h3>',
+            '<div class="owner-lookup-row"><span>Reference</span><span>' + safeText(record.reference) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Order Type</span><span>' + safeText(record.orderType) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Payment Status</span><span>' + safeText(record.paymentStatus) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Order Status</span><span>' + safeText(record.orderStatus) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Package</span><span>' + safeText(record.packageTitle || record.packageId) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Quantity</span><span>' + safeText(record.quantity) + '</span></div>',
+            '<div class="owner-lookup-row"><span>Amount</span><span>' + safeText(record.amount) + ' ' + safeText(record.currency) + '</span></div>',
+            addRow('Verified At', record.verifiedAt),
+            addRow('Created At', record.createdAt),
+            '<h3 style="margin-top:16px;">Customer</h3>',
+            addRow('Name', customer.name),
+            addRow('Email', customer.email),
+            addRow('Phone', customer.phone),
+            addRow('Address', [customer.address, customer.city, customer.state].filter(Boolean).join(', ')),
+            addRow('Special Request', customer.specialRequest),
+            (record.warnings && record.warnings.length ? ('<div style="margin-top:14px;color:#b45309;font-size:0.92rem;">Warnings: ' + safeText(record.warnings.join(', ')) + '</div>') : '')
+        ].filter(Boolean).join('');
+
+        box.classList.remove('owner-hidden');
+    }
+
+    async function fetchOrderByReference(token, reference) {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(function() {
+            controller.abort();
+        }, 10000);
+
+        const response = await fetch(getApiUrl('/api/owner/order?ref=' + encodeURIComponent(reference)), {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Basic ' + token
+            },
+            signal: controller.signal
+        }).finally(function() {
+            window.clearTimeout(timeoutId);
+        });
+
+        const data = await response.json().catch(function() {
+            return {};
+        });
+
+        if (!response.ok || !data.success) {
+            if (response.status === 401) {
+                throw new Error('Invalid username or password. Please log in again.');
+            }
+            throw new Error(data.error || 'Unable to load order details');
+        }
+
+        return data.record;
+    }
+
     async function loadDashboard() {
         clearError('owner-dashboard-error');
         const token = getAuthToken();
@@ -139,6 +222,45 @@
                 ? 'Dashboard request timed out. Please confirm OWNER_STATS is bound and try again.'
                 : (error.message || 'Invalid username or password. Please try again.'));
         }
+    }
+
+    function initLookup() {
+        const form = document.getElementById('owner-lookup-form');
+        const input = document.getElementById('owner-lookup-ref');
+        if (!form || !input) return;
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            clearLookupError();
+            hideLookupResult();
+
+            const token = getAuthToken();
+            if (!token) {
+                showLookupError('Please log in first.');
+                return;
+            }
+
+            const reference = input.value.trim();
+            if (!reference) {
+                showLookupError('Enter a payment reference.');
+                return;
+            }
+
+            try {
+                const record = await fetchOrderByReference(token, reference);
+                renderLookupResult(record);
+            } catch (error) {
+                if (String(error.message || '').toLowerCase().includes('log in')) {
+                    clearAuthToken();
+                    setView(false);
+                }
+                showLookupError(error.name === 'AbortError' ? 'Request timed out. Please try again.' : (error.message || 'Unable to load order details'));
+            }
+        });
+
+        input.addEventListener('input', function() {
+            clearLookupError();
+        });
     }
 
     function initLogin() {
@@ -200,6 +322,7 @@
     document.addEventListener('DOMContentLoaded', function() {
         injectBrandVariables();
         initLogin();
+        initLookup();
         initActions();
         loadDashboard();
     });
