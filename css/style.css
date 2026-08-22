@@ -103,6 +103,8 @@ img {
     box-shadow: -10px 0 30px rgba(17,24,39,0.18);
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overscroll-behavior: contain;
 }
 
 .cart-drawer-header {
@@ -113,12 +115,22 @@ img {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex: 0 0 auto;
+}
+
+.cart-drawer #cart-drawer-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 
 .cart-drawer-footer {
     padding: 14px;
     background: #fff;
     border-top: 1px solid var(--border);
+    flex: 0 0 auto;
 }
 
 a {
