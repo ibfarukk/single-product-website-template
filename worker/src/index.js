@@ -626,14 +626,17 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
     const customer = customerInfo || (transaction.metadata ? transaction.metadata.custom_fields : []);
     const customerEmail = transaction.customer ? transaction.customer.email : '';
     const fromEmail = getFromEmail(env);
+    const emailContext = await getEmailContext(env);
 
     // Build owner email
     const ownerSubject = 'NEW ORDER - ' + transaction.reference;
     const ownerBody = buildOwnerEmail(transaction, method, customer);
+    const ownerHtml = buildOwnerEmailHtml(transaction, method, customer, emailContext);
 
     // Build customer email
     const customerSubject = 'Order Confirmation - ' + transaction.reference;
     const customerBody = buildCustomerEmail(transaction, method, customer);
+    const customerHtml = buildCustomerEmailHtml(transaction, method, customer, emailContext);
 
     const jobs = [];
     if (ownerEmail) {
@@ -641,7 +644,8 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
             from: fromEmail,
             to: ownerEmail,
             subject: ownerSubject,
-            text: ownerBody
+            text: ownerBody,
+            html: ownerHtml
         }));
     }
     if (customerEmail) {
@@ -649,7 +653,8 @@ async function sendOrderEmails(transaction, env, method, customerInfo) {
             from: fromEmail,
             to: customerEmail,
             subject: customerSubject,
-            text: customerBody
+            text: customerBody,
+            html: customerHtml
         }));
     }
     if (!jobs.length) return;
@@ -673,6 +678,8 @@ async function sendManualOrderEmail(data, env) {
 
     const subject = 'NEW MANUAL PAYMENT ORDER - ' + data.order_ref;
     const body = buildManualOrderEmail(data);
+    const emailContext = await getEmailContext(env);
+    const html = buildManualOrderEmailHtml(data, emailContext);
     const fromEmail = getFromEmail(env);
     const attachments = [];
 
@@ -686,6 +693,7 @@ async function sendManualOrderEmail(data, env) {
 
     const customerSubject = 'Order Received - ' + data.order_ref;
     const customerBody = buildManualCustomerEmail(data);
+    const customerHtml = buildManualCustomerEmailHtml(data, emailContext);
     const customerEmail = data.customer && data.customer.email ? data.customer.email : '';
 
     const jobs = [];
@@ -695,6 +703,7 @@ async function sendManualOrderEmail(data, env) {
             to: ownerEmail,
             subject: subject,
             text: body,
+            html: html,
             attachments: attachments
         }));
     }
@@ -703,7 +712,8 @@ async function sendManualOrderEmail(data, env) {
             from: fromEmail,
             to: customerEmail,
             subject: customerSubject,
-            text: customerBody
+            text: customerBody,
+            html: customerHtml
         }));
     }
     if (!jobs.length) return;
@@ -1054,23 +1064,410 @@ function escapeHtmlText(value) {
         .replace(/>/g, '&gt;');
 }
 
+let siteConfigCache = { loadedAt: 0, value: null, promise: null };
+
+async function getEmailContext(env) {
+    const site = await getSiteConfig(env);
+    const business = site && site.BUSINESS ? site.BUSINESS : {};
+    const brand = site && site.BRAND ? site.BRAND : {};
+    const product = site && site.PRODUCT ? site.PRODUCT : {};
+    const packages = site && Array.isArray(site.PACKAGES) ? site.PACKAGES : [];
+
+    const resolvedBrand = {
+        businessName: String(business.name || env.BUSINESS_NAME || ''),
+        shortName: String(business.shortName || env.BUSINESS_SHORT_NAME || ''),
+        website: String(business.website || env.BUSINESS_WEBSITE || ''),
+        primary: String(brand.primaryColor || env.BRAND_PRIMARY_COLOR || '#0f172a'),
+        primaryDark: String(brand.primaryDark || env.BRAND_PRIMARY_DARK || '#0b1220'),
+        surface: String(brand.backgroundColor || env.BRAND_SURFACE_COLOR || '#FFFFFF'),
+        background: String(brand.lightBackground || env.BRAND_BACKGROUND_COLOR || '#F8FAFC'),
+        text: String(brand.textColor || env.BRAND_TEXT_COLOR || '#111827'),
+        muted: String(brand.mutedTextColor || env.BRAND_MUTED_TEXT_COLOR || '#6B7280'),
+        border: String(brand.borderColor || env.BRAND_BORDER_COLOR || '#E5E7EB')
+    };
+
+    return {
+        site: {
+            business: business,
+            brand: brand,
+            product: product,
+            packages: packages
+        },
+        brand: resolvedBrand
+    };
+}
+
+async function getSiteConfig(env) {
+    const ttlMs = 5 * 60 * 1000;
+    const now = Date.now();
+    if (siteConfigCache.value && now - siteConfigCache.loadedAt < ttlMs) {
+        return siteConfigCache.value;
+    }
+
+    if (siteConfigCache.promise) {
+        return siteConfigCache.promise;
+    }
+
+    siteConfigCache.promise = (async function() {
+        if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {
+            siteConfigCache.value = null;
+            siteConfigCache.loadedAt = Date.now();
+            return siteConfigCache.value;
+        }
+
+        const response = await env.ASSETS.fetch(new Request('http://internal/js/config.js'));
+        if (!response || !response.ok) {
+            siteConfigCache.value = null;
+            siteConfigCache.loadedAt = Date.now();
+            return siteConfigCache.value;
+        }
+
+        const text = await response.text();
+        const site = {
+            BUSINESS: parseJsConst(text, 'BUSINESS'),
+            BRAND: parseJsConst(text, 'BRAND'),
+            PRODUCT: parseJsConst(text, 'PRODUCT'),
+            PACKAGES: parseJsConst(text, 'PACKAGES')
+        };
+
+        siteConfigCache.value = site;
+        siteConfigCache.loadedAt = Date.now();
+        return siteConfigCache.value;
+    })().finally(function() {
+        siteConfigCache.promise = null;
+    });
+
+    return siteConfigCache.promise;
+}
+
+function parseJsConst(source, name) {
+    try {
+        const literal = extractConstLiteral(source, name);
+        if (!literal) return null;
+        return parseJsLiteral(literal);
+    } catch (error) {
+        return null;
+    }
+}
+
+function stripJsComments(value) {
+    return String(value || '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+function extractConstLiteral(source, name) {
+    const input = String(source || '');
+    const marker = 'const ' + name;
+    const start = input.indexOf(marker);
+    if (start < 0) return '';
+    const eq = input.indexOf('=', start);
+    if (eq < 0) return '';
+
+    let i = eq + 1;
+    while (i < input.length && /\s/.test(input[i])) i += 1;
+    const open = input[i];
+    const close = open === '{' ? '}' : (open === '[' ? ']' : '');
+    if (!close) return '';
+
+    let depth = 0;
+    let inString = false;
+    let quote = '';
+    let escape = false;
+    let endIndex = -1;
+
+    for (; i < input.length; i += 1) {
+        const ch = input[i];
+        if (inString) {
+            if (escape) {
+                escape = false;
+                continue;
+            }
+            if (ch === '\\\\') {
+                escape = true;
+                continue;
+            }
+            if (ch === quote) {
+                inString = false;
+                quote = '';
+            }
+            continue;
+        }
+
+        if (ch === '"' || ch === "'") {
+            inString = true;
+            quote = ch;
+            continue;
+        }
+
+        if (ch === open) {
+            depth += 1;
+            continue;
+        }
+
+        if (ch === close) {
+            depth -= 1;
+            if (depth === 0) {
+                endIndex = i + 1;
+                break;
+            }
+        }
+    }
+
+    if (endIndex < 0) return '';
+    return input.slice(eq + 1, endIndex).trim();
+}
+
+function parseJsLiteral(value) {
+    let text = stripJsComments(value).trim();
+    if (!text) return null;
+    text = text.replace(/;\s*$/, '');
+    text = text.replace(/([,{]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":');
+    text = text.replace(/,(\s*[}\]])/g, '$1');
+    return JSON.parse(text);
+}
+
+function buildEmailShell(context, options) {
+    const brand = context.brand;
+    const title = escapeHtmlText(options.title || brand.shortName || brand.businessName);
+    const preheader = escapeHtmlText(options.preheader || '');
+    const content = String(options.contentHtml || '');
+    const year = new Date().getUTCFullYear();
+    const footerLine = escapeHtmlText(options.footerLine || ('© ' + year + ' ' + (brand.businessName || brand.shortName || '') + '.'));
+    const website = String(brand.website || '').trim();
+    const websiteHtml = website ? ('<a href="' + escapeHtmlText(website) + '" style="color:' + escapeHtmlText(brand.primary) + ';text-decoration:none;">' + escapeHtmlText(website) + '</a>') : '';
+
+    return [
+        '<!doctype html>',
+        '<html>',
+        '<head>',
+        '<meta charset="utf-8" />',
+        '<meta name="viewport" content="width=device-width,initial-scale=1" />',
+        '<title>' + title + '</title>',
+        '</head>',
+        '<body style="margin:0;padding:0;background:' + escapeHtmlText(brand.background) + ';font-family:Inter,Segoe UI,Arial,sans-serif;color:' + escapeHtmlText(brand.text) + ';">',
+        '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' + preheader + '</div>',
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:' + escapeHtmlText(brand.background) + ';padding:24px 0;">',
+        '<tr><td align="center">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px;max-width:600px;">',
+        '<tr><td style="padding:0 16px 16px 16px;">',
+        '<div style="display:flex;align-items:center;gap:12px;">',
+        '<div style="width:44px;height:44px;border-radius:12px;background:' + escapeHtmlText(brand.primary) + ';"></div>',
+        '<div>',
+        '<div style="font-weight:800;font-size:18px;line-height:1.2;">' + escapeHtmlText(brand.shortName) + '</div>',
+        '<div style="color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.4;">' + escapeHtmlText(brand.businessName) + '</div>',
+        '</div>',
+        '</div>',
+        '</td></tr>',
+        '<tr><td style="padding:0 16px;">',
+        '<div style="background:' + escapeHtmlText(brand.surface) + ';border:1px solid ' + escapeHtmlText(brand.border) + ';border-radius:18px;overflow:hidden;box-shadow:0 10px 25px rgba(17,24,39,0.08);">',
+        '<div style="padding:22px 22px 0 22px;">' + content + '</div>',
+        '<div style="padding:18px 22px 22px 22px;color:' + escapeHtmlText(brand.muted) + ';font-size:12px;line-height:1.6;border-top:1px solid ' + escapeHtmlText(brand.border) + ';margin-top:22px;">',
+        '<div>' + footerLine + '</div>',
+        (websiteHtml ? ('<div style="margin-top:6px;">' + websiteHtml + '</div>') : ''),
+        '</div>',
+        '</div>',
+        '</td></tr>',
+        '</table>',
+        '</td></tr>',
+        '</table>',
+        '</body>',
+        '</html>'
+    ].join('');
+}
+
+function buildEmailKeyValueRows(rows, context) {
+    const brand = context.brand;
+    const border = escapeHtmlText(brand.border);
+    const muted = escapeHtmlText(brand.muted);
+    const html = rows.map(function(row) {
+        return [
+            '<tr>',
+            '<td style="padding:10px 12px;border-bottom:1px solid ' + border + ';color:' + muted + ';font-size:13px;width:42%;">' + escapeHtmlText(row.label) + '</td>',
+            '<td style="padding:10px 12px;border-bottom:1px solid ' + border + ';font-size:13px;font-weight:600;">' + escapeHtmlText(row.value) + '</td>',
+            '</tr>'
+        ].join('');
+    }).join('');
+
+    return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ' + border + ';border-radius:14px;border-collapse:separate;border-spacing:0;overflow:hidden;margin-top:14px;">' + html + '</table>';
+}
+
+function getPackageById(packages, id) {
+    const list = Array.isArray(packages) ? packages : [];
+    const key = String(id || '').trim();
+    if (!key) return null;
+    return list.find(function(item) {
+        return item && String(item.id || '').trim() === key;
+    }) || null;
+}
+
+function buildAddressLine(customer) {
+    if (!customer) return '';
+    const parts = [];
+    if (customer.address) parts.push(String(customer.address));
+    if (customer.city) parts.push(String(customer.city));
+    if (customer.state) parts.push(String(customer.state));
+    return parts.filter(Boolean).join(', ');
+}
+
+function buildOwnerEmailHtml(transaction, method, customer, context) {
+    const amount = String((transaction.amount || 0) / 100);
+    const currency = String(transaction.currency || '');
+    const packageId = extractCustomFieldValue(transaction, 'package') || '';
+    const pkg = getPackageById(context.site.packages, packageId);
+    const productName = context.site.product && context.site.product.name ? String(context.site.product.name) : '';
+
+    const rows = [
+        { label: 'Reference', value: transaction.reference || '' },
+        { label: 'Amount', value: amount + ' ' + currency },
+        { label: 'Product', value: productName || '' },
+        { label: 'Package', value: pkg ? String(pkg.title || pkg.id || '') : packageId },
+        { label: 'Quantity', value: String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : '')) },
+        { label: 'Payment Method', value: String(method || '') },
+        { label: 'Status', value: String(transaction.status || '') }
+    ];
+
+    const customerLines = [];
+    if (customer && !Array.isArray(customer)) {
+        customerLines.push('Name: ' + String(customer.name || ''));
+        customerLines.push('Email: ' + String(customer.email || ''));
+        customerLines.push('Phone: ' + String(customer.phone || ''));
+        customerLines.push('Address: ' + buildAddressLine(customer));
+        if (customer.specialRequest) customerLines.push('Special Request: ' + String(customer.specialRequest));
+    } else if (Array.isArray(customer)) {
+        customer.forEach(function(field) {
+            if (!field) return;
+            customerLines.push(String(field.display_name || field.variable_name || 'Field') + ': ' + String(field.value || ''));
+        });
+    }
+
+    const customerHtml = customerLines.length
+        ? '<div style="margin-top:16px;font-weight:700;">Customer details</div><div style="margin-top:8px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.7;">' + customerLines.map(function(line) { return escapeHtmlText(line); }).join('<br/>') + '</div>'
+        : '';
+
+    const headline = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">New order received</div>' +
+        '<div style="color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">A customer just placed an order. Please review and process it.</div>';
+
+    return buildEmailShell(context, {
+        title: 'New order - ' + String(transaction.reference || ''),
+        preheader: 'New order received: ' + String(transaction.reference || ''),
+        contentHtml: headline + buildEmailKeyValueRows(rows, context) + customerHtml
+    });
+}
+
+function buildCustomerEmailHtml(transaction, method, customer, context) {
+    const amount = String((transaction.amount || 0) / 100);
+    const currency = String(transaction.currency || '');
+    const packageId = extractCustomFieldValue(transaction, 'package') || '';
+    const pkg = getPackageById(context.site.packages, packageId);
+    const productName = context.site.product && context.site.product.name ? String(context.site.product.name) : '';
+    const rows = [
+        { label: 'Order reference', value: transaction.reference || '' },
+        { label: 'Product', value: productName || '' },
+        { label: 'Package', value: pkg ? String(pkg.title || pkg.id || '') : packageId },
+        { label: 'Quantity', value: String(extractCustomFieldValue(transaction, 'quantity') || (pkg && pkg.quantity ? pkg.quantity : '')) },
+        { label: 'Amount paid', value: amount + ' ' + currency },
+        { label: 'Payment method', value: String(method || '') }
+    ];
+
+    const greeting = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">Payment received</div>' +
+        '<div style="color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">Thank you for your purchase. Your order is confirmed and will be processed shortly.</div>';
+
+    const note = '<div style="margin-top:16px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.7;">Keep this reference handy: <span style="font-weight:700;color:' + escapeHtmlText(context.brand.text) + ';">' + escapeHtmlText(String(transaction.reference || '')) + '</span>.</div>';
+
+    return buildEmailShell(context, {
+        title: 'Order confirmation - ' + String(transaction.reference || ''),
+        preheader: 'Your order is confirmed: ' + String(transaction.reference || ''),
+        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + note
+    });
+}
+
+function buildManualOrderEmailHtml(data, context) {
+    const productName = data.product || (context.site.product && context.site.product.name ? String(context.site.product.name) : '');
+    const rows = [
+        { label: 'Order reference', value: data.order_ref || '' },
+        { label: 'Product', value: productName || '' },
+        { label: 'Package', value: data.package_title || '' },
+        { label: 'Quantity', value: String(data.quantity || 0) },
+        { label: 'Amount', value: String(data.amount || 0) + ' ' + String(data.currency || '') },
+        { label: 'Receipt attached', value: data.receipt ? 'Yes' : 'No' }
+    ];
+
+    const headline = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">Manual order received</div>' +
+        '<div style="color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.6;">A customer submitted a manual bank transfer order. Please verify payment and process the order.</div>';
+
+    const addressLine = buildAddressLine(data.customer);
+    const customerLines = [
+        'Name: ' + String(data.customer && data.customer.name ? data.customer.name : ''),
+        'Phone: ' + String(data.customer && data.customer.phone ? data.customer.phone : ''),
+        'Email: ' + String(data.customer && data.customer.email ? data.customer.email : ''),
+        'Address: ' + (addressLine || 'Not required'),
+        'State: ' + String(data.customer && data.customer.state ? data.customer.state : ''),
+        'City: ' + String(data.customer && data.customer.city ? data.customer.city : '')
+    ].filter(function(line) { return !/:\s*$/.test(line); });
+
+    const customerHtml = '<div style="margin-top:16px;font-weight:700;">Customer details</div><div style="margin-top:8px;color:' + escapeHtmlText(context.brand.muted) + ';font-size:13px;line-height:1.7;">' + customerLines.map(function(line) { return escapeHtmlText(line); }).join('<br/>') + '</div>';
+
+    return buildEmailShell(context, {
+        title: 'Manual order - ' + String(data.order_ref || ''),
+        preheader: 'Manual order received: ' + String(data.order_ref || ''),
+        contentHtml: headline + buildEmailKeyValueRows(rows, context) + customerHtml
+    });
+}
+
+function buildManualCustomerEmailHtml(data, context) {
+    const brand = context.brand;
+    const name = data.customer && data.customer.name ? data.customer.name : 'Valued customer';
+    const greeting = '<div style="font-size:18px;font-weight:800;margin:0 0 6px 0;">We received your order</div>' +
+        '<div style="color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.6;">Thank you, ' + escapeHtmlText(name) + '. Your order has been received and is awaiting payment confirmation.</div>';
+
+    const productName = data.product || (context.site.product && context.site.product.name ? String(context.site.product.name) : '');
+    const rows = [
+        { label: 'Order reference', value: data.order_ref || '' },
+        { label: 'Product', value: productName || '' },
+        { label: 'Package', value: data.package_title || '' },
+        { label: 'Amount', value: String(data.amount || 0) + ' ' + String(data.currency || '') }
+    ];
+
+    const note = '<div style="margin-top:16px;color:' + escapeHtmlText(brand.muted) + ';font-size:13px;line-height:1.7;">Please complete your bank transfer and send your proof of payment. Once confirmed, we will process your order.</div>';
+
+    return buildEmailShell(context, {
+        title: 'Order received - ' + String(data.order_ref || ''),
+        preheader: 'Order received: ' + String(data.order_ref || ''),
+        contentHtml: greeting + buildEmailKeyValueRows(rows, context) + note
+    });
+}
+
 // =========================================================
 // EMAIL BUILDERS
 // =========================================================
 function buildOwnerEmail(transaction, method, customer) {
     let customerDetails = '';
+    let packageLine = '';
+    let quantityLine = '';
     if (Array.isArray(customer)) {
         customer.forEach(function(field) {
             customerDetails += field.display_name + ': ' + field.value + '\\n';
         });
+        packageLine = String(extractCustomFieldValue(transaction, 'package') || '');
+        quantityLine = String(extractCustomFieldValue(transaction, 'quantity') || '');
     } else if (customer) {
         customerDetails = 'Name: ' + (customer.name || '') + '\\n';
+        customerDetails += 'Email: ' + (customer.email || '') + '\\n';
         customerDetails += 'Phone: ' + (customer.phone || '') + '\\n';
-        customerDetails += 'Address: ' + (customer.address || '') + '\\n';
+        const address = [customer.address || '', customer.city || '', customer.state || ''].filter(Boolean).join(', ');
+        customerDetails += 'Address: ' + address + '\\n';
+        if (customer.specialRequest) {
+            customerDetails += 'Special Request: ' + customer.specialRequest + '\\n';
+        }
+        packageLine = String(customer.packageId || '');
+        quantityLine = String(customer.quantity || '');
     }
 
     return 'NEW ORDER RECEIVED\\n\\n' +
         'Reference: ' + transaction.reference + '\\n' +
+        (packageLine ? ('Package: ' + packageLine + '\\n') : '') +
+        (quantityLine ? ('Quantity: ' + quantityLine + '\\n') : '') +
         'Amount: ' + (transaction.amount / 100) + ' ' + transaction.currency + '\\n' +
         'Payment Method: ' + method + '\\n' +
         'Status: ' + transaction.status + '\\n\\n' +
@@ -1080,11 +1477,15 @@ function buildOwnerEmail(transaction, method, customer) {
 }
 
 function buildCustomerEmail(transaction, method, customer) {
+    const packageLine = String(extractCustomFieldValue(transaction, 'package') || '');
+    const quantityLine = String(extractCustomFieldValue(transaction, 'quantity') || '');
     return 'Thank you for your order!\\n\\n' +
         'Order Reference: ' + transaction.reference + '\\n' +
-        'Amount: ' + (transaction.amount / 100) + ' ' + transaction.currency + '\\n\\n' +
+        (packageLine ? ('Package: ' + packageLine + '\\n') : '') +
+        (quantityLine ? ('Quantity: ' + quantityLine + '\\n') : '') +
+        'Amount: ' + (transaction.amount / 100) + ' ' + transaction.currency + '\\n' +
+        'Payment Method: ' + method + '\\n\\n' +
         'We have received your payment and will process your order shortly.\\n' +
-        'You will receive another email once your order has been shipped.\\n\\n' +
         'Thank you for shopping with us!';
 }
 
@@ -1167,6 +1568,7 @@ async function sendViaGmailSmtp(env, email) {
         to: toList,
         subject: email.subject,
         text: email.text || '',
+        html: email.html || '',
         attachments: email.attachments || []
     });
 
@@ -1221,6 +1623,9 @@ async function sendViaResend(env, email) {
         subject: email.subject,
         text: email.text || ''
     };
+    if (email.html) {
+        payload.html = email.html;
+    }
 
     if (email.attachments && email.attachments.length) {
         payload.attachments = email.attachments.map(function(attachment) {
@@ -1342,19 +1747,43 @@ function buildMimeMessage(email) {
         'MIME-Version: 1.0'
     ];
 
-    if (!email.attachments || !email.attachments.length) {
+    const hasAttachments = Boolean(email.attachments && email.attachments.length);
+    const hasHtml = Boolean(email.html && String(email.html).trim());
+
+    if (!hasAttachments && !hasHtml) {
         headers.push('Content-Type: text/plain; charset=UTF-8');
         headers.push('Content-Transfer-Encoding: 8bit');
         return headers.join('\r\n') + '\r\n\r\n' + normalizeLineBreaks(email.text || '');
     }
 
-    const boundary = '----=_PMELAB_' + Math.random().toString(16).slice(2) + Date.now();
+    const altBoundary = '----=_PMELAB_ALT_' + Math.random().toString(16).slice(2) + Date.now();
+    const writeAlternativeBody = function() {
+        let part = '';
+        part += '--' + altBoundary + '\r\n';
+        part += 'Content-Type: text/plain; charset=UTF-8\r\n';
+        part += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
+        part += normalizeLineBreaks(email.text || '') + '\r\n';
+        if (hasHtml) {
+            part += '--' + altBoundary + '\r\n';
+            part += 'Content-Type: text/html; charset=UTF-8\r\n';
+            part += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
+            part += normalizeLineBreaks(String(email.html || '')) + '\r\n';
+        }
+        part += '--' + altBoundary + '--';
+        return part;
+    };
+
+    if (!hasAttachments) {
+        headers.push('Content-Type: multipart/alternative; boundary="' + altBoundary + '"');
+        return headers.join('\r\n') + '\r\n\r\n' + writeAlternativeBody();
+    }
+
+    const boundary = '----=_PMELAB_MIX_' + Math.random().toString(16).slice(2) + Date.now();
     let message = headers.join('\r\n') + '\r\n';
     message += 'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n';
     message += '--' + boundary + '\r\n';
-    message += 'Content-Type: text/plain; charset=UTF-8\r\n';
-    message += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
-    message += normalizeLineBreaks(email.text || '') + '\r\n';
+    message += 'Content-Type: multipart/alternative; boundary="' + altBoundary + '"\r\n\r\n';
+    message += writeAlternativeBody() + '\r\n';
 
     email.attachments.forEach(function(attachment) {
         message += '--' + boundary + '\r\n';
