@@ -142,10 +142,9 @@
         if (!box) return;
 
         const customer = record && record.customer ? record.customer : {};
-        const lines = [];
-        const addRow = function(label, value) {
-            if (value === undefined || value === null || value === '') return;
-            lines.push('<div class="owner-lookup-row"><span>' + label + '</span><span>' + safeText(value) + '</span></div>');
+        const rowHtml = function(label, value) {
+            if (value === undefined || value === null || value === '') return '';
+            return '<div class="owner-lookup-row"><span>' + label + '</span><span>' + safeText(value) + '</span></div>';
         };
 
         box.innerHTML = [
@@ -157,14 +156,14 @@
             '<div class="owner-lookup-row"><span>Package</span><span>' + safeText(record.packageTitle || record.packageId) + '</span></div>',
             '<div class="owner-lookup-row"><span>Quantity</span><span>' + safeText(record.quantity) + '</span></div>',
             '<div class="owner-lookup-row"><span>Amount</span><span>' + safeText(record.amount) + ' ' + safeText(record.currency) + '</span></div>',
-            addRow('Verified At', record.verifiedAt),
-            addRow('Created At', record.createdAt),
+            rowHtml('Verified At', record.verifiedAt),
+            rowHtml('Created At', record.createdAt),
             '<h3 style="margin-top:16px;">Customer</h3>',
-            addRow('Name', customer.name),
-            addRow('Email', customer.email),
-            addRow('Phone', customer.phone),
-            addRow('Address', [customer.address, customer.city, customer.state].filter(Boolean).join(', ')),
-            addRow('Special Request', customer.specialRequest),
+            rowHtml('Name', customer.name),
+            rowHtml('Email', customer.email),
+            rowHtml('Phone', customer.phone),
+            rowHtml('Address', [customer.address, customer.city, customer.state].filter(Boolean).join(', ')),
+            rowHtml('Special Request', customer.specialRequest),
             (record.warnings && record.warnings.length ? ('<div style="margin-top:14px;color:#b45309;font-size:0.92rem;">Warnings: ' + safeText(record.warnings.join(', ')) + '</div>') : '')
         ].filter(Boolean).join('');
 
